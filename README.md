@@ -46,6 +46,7 @@ Set the environment values before opening the app. Vite serves the client at `ht
 - Text, voice, image, PDF, and Word-file messages (maximum 10 MB; voice notes capped at 2 minutes); edit/delete own text messages
 - Group creation with name and picture URL, live member listing, and admin-authorized member/admin promotion and removal
 - Unread notification counts and opt-in browser notifications
+- Built-in Gather Help Bot for common how-to questions (no external AI service; chat history stays in the current browser)
 - Responsive dashboard layout with loading, empty, and error states
 - Rate limiting, security headers, validated request bodies, Firestore rules, and Storage rules
 

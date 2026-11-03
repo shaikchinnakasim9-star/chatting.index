@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell, BellOff, Check, ChevronDown, CircleHelp, LogOut, MessageCircle, MoreHorizontal,
+  Bell, BellOff, Bot, Check, ChevronDown, CircleHelp, LogOut, MessageCircle, MoreHorizontal,
   Plus, Search, Settings, Users, X,
 } from "lucide-react";
 import { updateProfile, type User } from "firebase/auth";
 import { api } from "../services/api";
 import { isProfileOnline, watchConversations, watchNotifications, watchProfiles, type Conversation, type NotificationItem, type Profile } from "../services/chat";
+import HelpBotPanel from "./HelpBotPanel";
 import MessagePanel from "./MessagePanel";
 
 type Props = { user: User; onLogout: () => Promise<void> };
@@ -26,6 +27,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [active, setActive] = useState<Conversation | null>(null);
+  const [helpBotOpen, setHelpBotOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchUser[]>([]);
   const [busy, setBusy] = useState(false);
@@ -90,6 +92,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         method: "POST", body: JSON.stringify({ type: "direct", members: [target.uid] }),
       });
       const conversation = conversations.find((item) => item.id === result.id);
+      setHelpBotOpen(false);
       if (conversation) setActive(conversation);
       else setActive({ id: result.id, type: "direct", members: [user.uid, target.uid] });
       setSearch("");
@@ -108,6 +111,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         body: JSON.stringify({ type: "group", name: groupName.trim(), photoURL: groupPhoto.trim(), members: groupMembers }),
       });
       const newConversation: Conversation = { id: result.id, type: "group", name: groupName.trim(), photoURL: groupPhoto.trim(), members: [user.uid, ...groupMembers], admins: [user.uid] };
+      setHelpBotOpen(false);
       setActive(newConversation);
       setShowGroup(false);
       setGroupName("");
@@ -157,7 +161,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   }
 
   return <main className="app-shell">
-    <aside className={`sidebar ${active ? "sidebar-hidden-mobile" : ""}`}>
+    <aside className={`sidebar ${active || helpBotOpen ? "sidebar-hidden-mobile" : ""}`}>
       <header className="sidebar-header">
         <div className="brand-lockup"><span className="brand-mark"><MessageCircle size={21} /></span><span>gather</span></div>
         <button className="icon-button" aria-label="More options" onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>
@@ -183,6 +187,17 @@ export default function ChatDashboard({ user, onLogout }: Props) {
           <MessageCircle size={16} />
         </button>)}
       </div>}
+      <button
+        className={`conversation-card help-bot-card ${helpBotOpen ? "conversation-active" : ""}`}
+        onClick={() => { setActive(null); setHelpBotOpen(true); }}
+        aria-current={helpBotOpen ? "page" : undefined}
+      >
+        <span className="help-bot-avatar"><Bot size={19} /></span>
+        <span className="conversation-copy">
+          <span className="conversation-line"><strong>Gather Help Bot</strong><span className="help-bot-badge">HELP</span></span>
+          <span className="last-message">Ask how Gather works</span>
+        </span>
+      </button>
       <div className="conversation-list">
         {conversations.length === 0 ? <div className="empty-sidebar">
           <div className="empty-icon"><Users size={20} /></div><strong>Your people are one search away</strong>
@@ -190,7 +205,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         </div> : conversations.map((conversation) => {
           const profile = getProfile(conversation);
           const isActive = active?.id === conversation.id;
-          return <button key={conversation.id} className={`conversation-card ${isActive ? "conversation-active" : ""}`} onClick={() => setActive(conversation)}>
+          return <button key={conversation.id} className={`conversation-card ${isActive ? "conversation-active" : ""}`} onClick={() => { setHelpBotOpen(false); setActive(conversation); }}>
             {conversation.type === "group" ? <span className="avatar group-avatar">{conversation.photoURL ? <img src={conversation.photoURL} alt="" /> : <Users size={19} />}</span> : <Avatar small name={profile?.displayName} photoURL={profile?.photoURL} online={isProfileOnline(profile)} />}
             <span className="conversation-copy">
               <span className="conversation-line"><strong>{getTitle(conversation)}</strong><time>{conversation.updatedAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></span>
@@ -208,9 +223,9 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         </div>
       </footer>
     </aside>
-    <section className={`main-panel ${active ? "" : "main-panel-empty"}`}>
+    <section className={`main-panel ${active || helpBotOpen ? "" : "main-panel-empty"}`}>
       {error && <div className="global-error"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
-      {active ? <MessagePanel
+      {helpBotOpen ? <HelpBotPanel key={user.uid} user={user} onBack={() => setHelpBotOpen(false)} /> : active ? <MessagePanel
         key={active.id}
         conversation={active}
         title={getTitle(active)}
@@ -225,7 +240,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         <p>Choose someone from your messages or search for a person to get started.</p>
         <div className="welcome-tips"><span><Check size={15} /> Private by design</span><span><Check size={15} /> Here, in real time</span></div>
       </div>}
-      <div className="floating-help" title="Gather messages"><CircleHelp size={17} /></div>
+      <button className="floating-help" title="Open Gather Help Bot" aria-label="Open Gather Help Bot" onClick={() => { setActive(null); setHelpBotOpen(true); }}><CircleHelp size={17} /></button>
     </section>
     {showGroup && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowGroup(false); }}>
       <section className="group-modal">
