@@ -41,7 +41,7 @@ Set the environment values before opening the app. Vite serves the client at `ht
 - Email/password registration and sign-in, email verification, password reset, and logout
 - Firebase ID-token JWT bearer authentication on API routes; revoked and expired tokens are rejected, and logout revokes refresh tokens
 - Profile initialization and presence heartbeats with stale-online detection
-- Search registered accounts by display name or email and start private one-to-one conversations
+- Search verified registered accounts by username, full name, or email; open profiles with presence, last seen, bio, and opt-in email visibility, then open a private one-to-one chat
 - Real-time conversation and message listeners, delivered/read receipts, typing indicators, and message search
 - Text, voice, image, PDF, and Word-file messages (maximum 10 MB; voice notes capped at 2 minutes); edit/delete own text messages
 - Group creation with name and picture URL, live member listing, and admin-authorized member/admin promotion and removal
@@ -59,8 +59,8 @@ All `/api/*` routes require an `Authorization` header containing the signed-in u
 | POST | `/api/profile` | Create/update the signed-in user's profile |
 | POST | `/api/presence` | Update the signed-in user's presence |
 | POST | `/api/session/logout` | Revoke refresh tokens for the signed-in account |
-| GET | `/api/users?search=...` | Search registered profiles by display-name or email prefix (email is not returned) |
-| POST | `/api/conversations` | Create/reuse a direct conversation or create a group |
+| GET | `/api/users?search=...` | Search verified profiles by username, full-name, or email prefix; email is returned only when the profile owner opts in |
+| POST | `/api/conversations` | Reuse an existing one-to-one conversation or create one; create a group |
 | GET | `/api/conversations` | List conversations for the signed-in member |
 | GET | `/api/conversations/:id/messages` | Read the latest message history (maximum 100) |
 | POST | `/api/conversations/:id/messages` | Send a message or attachment reference |
@@ -76,7 +76,7 @@ All `/api/*` routes require an `Authorization` header containing the signed-in u
 ## Data model
 
 - `users/{uid}`: private account profile, including email
-- `publicProfiles/{uid}`: display name, avatar, and presence (readable to authenticated users)
+- `publicProfiles/{uid}`: display name, username, avatar, bio, and presence (readable to authenticated users); email is included only when its owner opts in
 - `conversations/{conversationId}`: member UIDs, direct/group type, admins, timestamps, and last message
 - `conversations/{conversationId}/messages/{messageId}`: sender, text/private Storage path metadata, timestamps, and readers
 - `notifications/{notificationId}`: recipient, message preview, conversation ID, read state, timestamp

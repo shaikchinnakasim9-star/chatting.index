@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { z } from "zod";
 import { auth, db } from "../config/firebase.js";
 import { authenticate } from "../middleware/authenticate.js";
@@ -10,7 +10,10 @@ api.use(authenticate);
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
+  username: z.string().trim().regex(/^[a-zA-Z0-9._-]{2,32}$/).optional(),
   photoURL: z.string().url().max(2048).or(z.literal("")).optional(),
+  about: z.string().trim().max(300).optional(),
+  shareEmail: z.boolean().optional(),
 });
 const conversationSchema = z.object({
   type: z.enum(["direct", "group"]),
@@ -59,19 +62,117 @@ async function memberConversation(conversationId: string, uid: string) {
   return { ref, data };
 }
 
+function defaultUsername(displayName: string, email: string, uid: string) {
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 32);
+  const name = normalize(displayName);
+  if (name.length >= 2) return name;
+  const emailName = normalize(email.split("@")[0] ?? "");
+  return emailName.length >= 2 ? emailName : `user${uid.slice(0, 8).toLowerCase()}`;
+}
+
+function displayNamePrefixes(displayName: string) {
+  const prefixes = new Set<string>();
+  const addPrefixes = (part: string) => {
+    for (let length = 2; length <= part.length; length += 1) prefixes.add(part.slice(0, length));
+  };
+  addPrefixes(displayName.toLowerCase());
+  for (const token of displayName.toLowerCase().split(/\s+/)) addPrefixes(token);
+  return [...prefixes];
+}
+
+function isAuthUserNotFound(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error
+    && error.code === "auth/user-not-found";
+}
+
+async function registeredProfile(uid: string) {
+  const accountRef = db.collection("users").doc(uid);
+  const [accountSnapshot, publicSnapshot] = await Promise.all([
+    accountRef.get(),
+    db.collection("publicProfiles").doc(uid).get(),
+  ]);
+  if (!accountSnapshot.exists || !publicSnapshot.exists) return null;
+
+  const account = accountSnapshot.data();
+  const publicProfile = publicSnapshot.data();
+  const username = typeof account?.username === "string" && /^[a-zA-Z0-9._-]{2,32}$/.test(account.username)
+    ? account.username
+    : null;
+  if (
+    !account
+    || !publicProfile
+    || !username
+    || account.uid !== uid
+    || publicProfile.uid !== uid
+    || typeof account.displayName !== "string"
+    || !account.displayName.trim()
+    || account.displayNameLower !== account.displayName.toLowerCase()
+    || typeof account.email !== "string"
+    || !z.string().email().safeParse(account.email).success
+    || typeof account.emailLower !== "string"
+    || account.email.toLowerCase() !== account.emailLower
+    || typeof account.online !== "boolean"
+    || typeof publicProfile.displayName !== "string"
+    || publicProfile.displayName !== account.displayName
+    || publicProfile.displayNameLower !== account.displayName.toLowerCase()
+    || publicProfile.username !== username
+    || publicProfile.usernameLower !== username.toLowerCase()
+    || typeof publicProfile.online !== "boolean"
+  ) return null;
+
+  let identity;
+  try {
+    identity = await auth.getUser(uid);
+  } catch (error) {
+    if (isAuthUserNotFound(error)) return null;
+    throw error;
+  }
+  if (
+    identity.uid !== uid
+    || identity.disabled
+    || !identity.emailVerified
+    || !identity.email
+    || identity.email.toLowerCase() !== account.emailLower
+  ) return null;
+
+  return {
+    uid,
+    displayName: account.displayName.trim(),
+    username,
+    photoURL: typeof account.photoURL === "string" ? account.photoURL : "",
+    about: typeof publicProfile.about === "string" ? publicProfile.about : "",
+    ...(typeof publicProfile.email === "string" && publicProfile.email
+      ? { email: publicProfile.email }
+      : {}),
+    online: account.online,
+    lastSeen: account.lastSeen,
+  };
+}
+
 api.post("/profile", async (req, res) => {
   const parsed = validBody(profileSchema, req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.message }); return; }
   const uid = req.user!.uid;
   const userRef = db.collection("users").doc(uid);
   const previous = await userRef.get();
+  const previousUsername = previous.data()?.username;
+  const username = parsed.data.username
+    ?? (typeof previousUsername === "string" && /^[a-zA-Z0-9._-]{2,32}$/.test(previousUsername)
+      ? previousUsername
+      : defaultUsername(parsed.data.displayName, req.user!.email ?? "", uid));
+  const usernameLower = username.toLowerCase();
   const profileBatch = db.batch();
   profileBatch.set(userRef, {
     uid,
     email: req.user!.email ?? "",
     emailLower: (req.user!.email ?? "").toLowerCase(),
     displayName: parsed.data.displayName,
+    displayNameLower: parsed.data.displayName.toLowerCase(),
+    displayNamePrefixes: displayNamePrefixes(parsed.data.displayName),
+    username,
+    usernameLower,
     photoURL: parsed.data.photoURL ?? "",
+    about: parsed.data.about ?? previous.data()?.about ?? "",
     online: true,
     lastSeen: FieldValue.serverTimestamp(),
     ...(previous.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
@@ -80,7 +181,15 @@ api.post("/profile", async (req, res) => {
     uid,
     displayName: parsed.data.displayName,
     displayNameLower: parsed.data.displayName.toLowerCase(),
+    username,
+    usernameLower,
     photoURL: parsed.data.photoURL ?? "",
+    about: parsed.data.about ?? previous.data()?.about ?? "",
+    ...(parsed.data.shareEmail === undefined
+      ? {}
+      : parsed.data.shareEmail
+        ? { email: req.user!.email ?? "" }
+        : { email: FieldValue.delete() }),
     online: true,
     lastSeen: FieldValue.serverTimestamp(),
   }, { merge: true });
@@ -91,36 +200,27 @@ api.post("/profile", async (req, res) => {
 api.get("/users", async (req, res) => {
   const search = String(req.query.search ?? "").trim().toLowerCase().slice(0, 80);
   if (search.length < 2) { res.json([]); return; }
-  const [nameMatches, emailMatches] = await Promise.all([
-    db.collection("publicProfiles").orderBy("displayNameLower").startAt(search).endAt(`${search}\uf8ff`).limit(20).get(),
-    db.collection("users").orderBy("emailLower").startAt(search).endAt(`${search}\uf8ff`).limit(20).get(),
+  const prefix = search.startsWith("@") ? search.slice(1) : search;
+  if (prefix.length < 2) { res.json([]); return; }
+  const fields = ["usernameLower", "displayNameLower", "emailLower"] as const;
+  const matches = await Promise.all([
+    ...fields.map((field) => db.collection("users")
+      .orderBy(field).startAt(prefix).endAt(`${prefix}\uf8ff`).limit(10).get()),
+    db.collection("users").where("displayNamePrefixes", "array-contains", prefix).limit(10).get(),
   ]);
-  const profiles = new Map<string, Record<string, unknown>>();
-  nameMatches.docs.forEach((profile) => profiles.set(profile.id, profile.data()));
-  const emailProfiles = await Promise.all(emailMatches.docs.map((account) => db.collection("publicProfiles").doc(account.id).get()));
-  emailProfiles.forEach((profile, index) => {
-    if (profile.exists) profiles.set(profile.id, { ...(profiles.get(profile.id) ?? {}), ...profile.data() });
-    else {
-      const account = emailMatches.docs[index].data();
-      profiles.set(emailMatches.docs[index].id, {
-        uid: emailMatches.docs[index].id,
-        displayName: account.displayName,
-        photoURL: account.photoURL,
-      });
+  const candidates = new Map<string, QueryDocumentSnapshot>();
+  for (const snapshot of matches) {
+    for (const account of snapshot.docs) {
+      if (account.id !== req.user!.uid && candidates.size < 30) candidates.set(account.id, account);
     }
-  });
-  const users = [...profiles.values()]
-    .filter((profile) => profile.uid !== req.user!.uid)
-    .map(({ uid, displayName, photoURL, online, lastSeen }) => ({
-      uid,
-      displayName,
-      photoURL,
-      online,
-      lastSeen: lastSeen && typeof lastSeen === "object" && "toDate" in lastSeen
-        ? (lastSeen as { toDate: () => Date }).toDate().toISOString()
-        : null,
-    }));
-  res.json(users);
+  }
+  const users = await Promise.all([...candidates.keys()].map((uid) => registeredProfile(uid)));
+  res.json(users.filter((profile) => profile !== null).slice(0, 20).map((profile) => ({
+    ...profile,
+    lastSeen: profile.lastSeen && typeof profile.lastSeen === "object" && "toDate" in profile.lastSeen
+      ? (profile.lastSeen as { toDate: () => Date }).toDate().toISOString()
+      : null,
+  })));
 });
 
 api.post("/session/logout", async (req, res) => {
@@ -150,8 +250,8 @@ api.post("/conversations", async (req, res) => {
     res.status(400).json({ error: "A direct conversation must have exactly two members." });
     return;
   }
-  const memberProfiles = await Promise.all(members.map((member) => db.collection("publicProfiles").doc(member).get()));
-  if (memberProfiles.some((profile) => !profile.exists)) {
+  const memberProfiles = await Promise.all(members.map((member) => registeredProfile(member)));
+  if (memberProfiles.some((profile) => profile === null)) {
     res.status(400).json({ error: "Every conversation member must have a verified Gather account." });
     return;
   }
@@ -162,9 +262,21 @@ api.post("/conversations", async (req, res) => {
   if (parsed.data.type === "direct") {
     const id = createHash("sha256").update([...members].sort().join(":")).digest("hex");
     const ref = db.collection("conversations").doc(id);
-    const created = await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
+      const existingChats = await transaction.get(db.collection("conversations")
+        .where("type", "==", "direct")
+        .where("members", "array-contains", uid));
+      const requestedMembers = [...members].sort();
+      const existingChat = existingChats.docs.find((chat) => {
+        const chatMembers = chat.data().members;
+        return Array.isArray(chatMembers)
+          && chatMembers.length === 2
+          && [...chatMembers].sort().every((member, index) => member === requestedMembers[index]);
+      });
+      if (existingChat) return { id: existingChat.id, created: false };
+
       const current = await transaction.get(ref);
-      if (current.exists) return false;
+      if (current.exists) return { id, created: false };
       transaction.create(ref, {
         type: "direct",
         members,
@@ -175,9 +287,9 @@ api.post("/conversations", async (req, res) => {
         updatedAt: FieldValue.serverTimestamp(),
         lastMessage: null,
       });
-      return true;
+      return { id, created: true };
     });
-    res.status(created ? 201 : 200).json({ id });
+    res.status(result.created ? 201 : 200).json({ id: result.id });
     return;
   }
   const ref = await db.collection("conversations").add({

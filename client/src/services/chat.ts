@@ -7,8 +7,11 @@ import type { User } from "firebase/auth";
 export type Profile = {
   uid: string;
   displayName: string;
+  username?: string;
   email?: string;
   photoURL?: string;
+  about?: string;
+  shareEmail?: boolean;
   online?: boolean;
   lastSeen?: { toDate: () => Date } | string | null;
 };

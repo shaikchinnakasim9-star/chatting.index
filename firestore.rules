@@ -16,7 +16,20 @@ service cloud.firestore {
     }
 
     match /publicProfiles/{uid} {
-      allow get: if signedIn();
+      allow get: if signedIn()
+        && resource.data.uid == uid
+        && resource.data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'displayNameLower',
+          'username',
+          'usernameLower',
+          'photoURL',
+          'about',
+          'email',
+          'online',
+          'lastSeen'
+        ]);
       allow list: if false;
       allow create, update, delete: if false;
     }

@@ -148,6 +148,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .search-person strong { color: #334258; font-size: 11px; }
 .search-person small { color: #8d98a6; font-size: 10px; }
 .subtle-state { display: block; padding: 14px 12px; color: #8a96a5; font-size: 11px; text-align: center; }
+.search-error { color: #a23838; }
 .notification-button i { position: absolute; top: 0; right: 0; min-width: 15px; padding: 2px 3px; color: white; border: 1px solid white; border-radius: 8px; background: #bb5656; font-size: 8px; font-style: normal; }
 .popover { position: absolute; z-index: 5; padding: 8px; border: 1px solid #e7ebf0; border-radius: 9px; background: white; box-shadow: 0 12px 32px #1b2b4518; }
 .menu-popover { top: 55px; right: 12px; width: 205px; }
@@ -287,6 +288,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .member-option svg { color: #3c699e; }
 .selected-count { margin: 10px 0; color: #718096; font-size: 10px; }
 .group-modal > .primary-button { margin-top: 16px; }
+.profile-edit-modal textarea { width: 100%; min-height: 78px; resize: vertical; padding: 12px 14px; color: #243248; border: 1px solid #dfe4eb; border-radius: 8px; background: white; font: inherit; font-size: 13px; }
+.privacy-toggle { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 9px !important; color: #637187 !important; font-weight: 500 !important; }
+.privacy-toggle input { width: 15px; height: 15px; accent-color: #274c78; }
+.user-profile-modal { width: min(100%, 390px); }
+.user-profile-modal > header { margin-bottom: 5px; }
+.user-profile-modal > header > div { display: flex; width: 100%; align-items: center; justify-content: space-between; }
+.profile-hero { display: grid; justify-items: center; padding: 6px 0 20px; text-align: center; }
+.profile-hero .avatar { width: 78px; height: 78px; border-radius: 25px; font-size: 25px; }
+.profile-hero .avatar img { border-radius: 25px; }
+.profile-hero h2 { margin: 15px 0 4px; color: #243650; font: 700 21px Manrope, sans-serif; }
+.profile-username { color: #8591a1; font-size: 12px; }
+.profile-presence { display: inline-flex; align-items: center; gap: 7px; margin-top: 12px; color: #7d8998; font-size: 11px; }
+.profile-presence i { width: 7px; height: 7px; border-radius: 50%; background: #a4acb7; }
+.profile-presence.is-online i { background: #38a477; box-shadow: 0 0 0 3px #38a47720; }
+.profile-details { display: grid; gap: 14px; padding: 17px 0; border-top: 1px solid #edf0f4; }
+.profile-details > div { display: grid; gap: 5px; }
+.profile-details > div > span { color: #8995a4; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.profile-details strong, .profile-about p { overflow-wrap: anywhere; margin: 0; color: #46566b; font-size: 12px; font-weight: 500; line-height: 1.6; }
+.chat-now-button { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 3px; }
 .loading-screen { display: flex; min-height: 100vh; align-items: center; justify-content: center; gap: 10px; color: #607087; background: #f8f9fb; font: 600 13px Manrope, sans-serif; }
 .loading-screen .brand-mark { display: grid; place-items: center; font-size: 19px; }
 .setup-page { display: grid; min-height: 100vh; place-items: center; padding: 28px; background: #f4f6f9; }

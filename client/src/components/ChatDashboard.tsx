@@ -16,6 +16,17 @@ function initials(name?: string) {
   return (name || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
+function defaultUsername(name: string, uid: string) {
+  const username = name.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 32);
+  return username.length >= 2 ? username : `user${uid.slice(0, 8).toLowerCase()}`;
+}
+
+function formatLastSeen(value: Profile["lastSeen"]) {
+  const timestamp = typeof value === "string" ? Date.parse(value) : value?.toDate().getTime();
+  if (!timestamp || !Number.isFinite(timestamp)) return "Not available";
+  return new Date(timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
 function Avatar({ name, photoURL, online, small = false }: { name?: string; photoURL?: string; online?: boolean; small?: boolean }) {
   return <span className={`avatar ${small ? "avatar-small" : ""}`}>
     {photoURL ? <img src={photoURL} alt="" /> : initials(name)}
@@ -31,6 +42,7 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchUser[]>([]);
   const [busy, setBusy] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [error, setError] = useState("");
   const [showGroup, setShowGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
@@ -42,7 +54,12 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileName, setProfileName] = useState(user.displayName || "");
+  const [profileUsername, setProfileUsername] = useState(defaultUsername(user.displayName || user.email || "", user.uid));
   const [profilePhoto, setProfilePhoto] = useState("");
+  const [profileAbout, setProfileAbout] = useState("");
+  const [shareEmail, setShareEmail] = useState(false);
+  const [viewingProfile, setViewingProfile] = useState<SearchUser | null>(null);
+  const [startingDirect, setStartingDirect] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const lastNotified = useRef<string | null>(null);
 
@@ -65,20 +82,57 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   }, [user.uid, notifications]);
 
   const memberIds = useMemo(() => [...new Set(conversations.flatMap((item) => item.members).filter((uid) => uid !== user.uid))], [conversations, user.uid]);
-  useEffect(() => watchProfiles(memberIds, (items) => {
+  const profileIds = useMemo(() => [...new Set([...memberIds, user.uid])], [memberIds, user.uid]);
+  useEffect(() => watchProfiles(profileIds, (items) => {
     setProfiles(Object.fromEntries(items.map((item) => [item.uid, item])));
-  }, (issue) => setError(issue.message)), [memberIds.join("|")]);
+  }, (issue) => setError(issue.message)), [profileIds.join("|")]);
 
   useEffect(() => {
-    if (search.trim().length < 2) { setResults([]); return; }
-    const timer = window.setTimeout(() => {
-      setBusy(true);
-      void api<SearchUser[]>(`/users?search=${encodeURIComponent(search.trim())}`)
-        .then(setResults).catch((issue: unknown) => setError(issue instanceof Error ? issue.message : "Could not search users."))
-        .finally(() => setBusy(false));
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [search]);
+    const term = search.trim();
+    let activeRequest = true;
+    let timer: number | undefined;
+    setSearchError("");
+    if (term.length < 2) {
+      setResults([]);
+      setBusy(false);
+      return () => { activeRequest = false; };
+    }
+
+    setResults([]);
+    setBusy(true);
+    const refreshResults = async () => {
+      try {
+        const items = await api<SearchUser[]>(`/users?search=${encodeURIComponent(term)}`);
+        if (activeRequest) {
+          setResults(items.filter((item) => item.uid !== user.uid));
+          setSearchError("");
+        }
+      } catch (issue) {
+        if (activeRequest) {
+          setResults([]);
+          setSearchError(issue instanceof Error ? issue.message : "Could not search registered users.");
+        }
+      } finally {
+        if (activeRequest) {
+          setBusy(false);
+          timer = window.setTimeout(() => void refreshResults(), 10_000);
+        }
+      }
+    };
+
+    timer = window.setTimeout(() => void refreshResults(), 250);
+    return () => {
+      activeRequest = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [search, user.uid]);
+
+  useEffect(() => {
+    if (!viewingProfile) return;
+    const latest = results.find((profile) => profile.uid === viewingProfile.uid);
+    if (latest) setViewingProfile(latest);
+    else if (!busy && search.trim().length >= 2) setViewingProfile(null);
+  }, [results, viewingProfile?.uid, busy, search]);
 
   useEffect(() => {
     if (!notificationSupported) return;
@@ -87,18 +141,23 @@ export default function ChatDashboard({ user, onLogout }: Props) {
 
   async function startDirect(target: SearchUser) {
     setError("");
+    setStartingDirect(true);
     try {
       const result = await api<{ id: string }>("/conversations", {
         method: "POST", body: JSON.stringify({ type: "direct", members: [target.uid] }),
       });
+      setProfiles((current) => ({ ...current, [target.uid]: target }));
       const conversation = conversations.find((item) => item.id === result.id);
       setHelpBotOpen(false);
       if (conversation) setActive(conversation);
       else setActive({ id: result.id, type: "direct", members: [user.uid, target.uid] });
       setSearch("");
       setResults([]);
+      setViewingProfile(null);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not start conversation.");
+    } finally {
+      setStartingDirect(false);
     }
   }
 
@@ -140,7 +199,14 @@ export default function ChatDashboard({ user, onLogout }: Props) {
     setError("");
     try {
       const displayName = profileName.trim();
-      await api("/profile", { method: "POST", body: JSON.stringify({ displayName, photoURL: profilePhoto.trim() }) });
+      const username = profileUsername.trim();
+      await api("/profile", { method: "POST", body: JSON.stringify({
+        displayName,
+        username,
+        photoURL: profilePhoto.trim(),
+        about: profileAbout.trim(),
+        shareEmail,
+      }) });
       await updateProfile(user, { displayName, photoURL: profilePhoto.trim() || null });
       setProfileOpen(false);
     } catch (issue) {
@@ -166,7 +232,15 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         <div className="brand-lockup"><span className="brand-mark"><MessageCircle size={21} /></span><span>gather</span></div>
         <button className="icon-button" aria-label="More options" onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>
         {menuOpen && <div className="popover menu-popover">
-          <button onClick={() => { setProfileName(user.displayName || ""); setProfilePhoto(user.photoURL || ""); setProfileOpen(true); setMenuOpen(false); }}><Settings size={16} /> Edit profile</button>
+          <button onClick={() => {
+            setProfileName(profiles[user.uid]?.displayName || user.displayName || "");
+            setProfileUsername(profiles[user.uid]?.username || defaultUsername(user.displayName || user.email || "", user.uid));
+            setProfilePhoto(profiles[user.uid]?.photoURL || user.photoURL || "");
+            setProfileAbout(profiles[user.uid]?.about || "");
+              setShareEmail(Boolean(profiles[user.uid]?.email));
+            setProfileOpen(true);
+            setMenuOpen(false);
+          }}><Settings size={16} /> Edit profile</button>
           <button onClick={toggleNotifications}>{notifications ? <BellOff size={16} /> : <Bell size={16} />}{notifications ? "Turn off notifications" : "Enable notifications"}</button>
           <button onClick={() => void onLogout()}><LogOut size={16} /> Sign out</button>
         </div>}
@@ -178,12 +252,13 @@ export default function ChatDashboard({ user, onLogout }: Props) {
       </div>
       <div className="sidebar-section-heading"><span>Messages</span><button className="icon-button new-chat-button" title="Create a group" onClick={() => setShowGroup(true)}><Plus size={18} /></button></div>
       <div className="search-wrap"><Search size={16} /><input placeholder="Search people…" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search users" /></div>
-      {search.trim().length >= 2 && <div className="search-results">
-        {busy && <div className="subtle-state">Searching…</div>}
-        {!busy && results.length === 0 && <div className="subtle-state">No people found</div>}
-        {results.map((person) => <button className="search-person" key={person.uid} onClick={() => void startDirect(person)}>
+      {search.trim().length >= 2 && <div className="search-results" aria-live="polite">
+        {busy && results.length === 0 && <div className="subtle-state">Searching registered accounts…</div>}
+        {!busy && searchError && <div className="subtle-state search-error">{searchError}</div>}
+        {!busy && !searchError && results.length === 0 && <div className="subtle-state">No registered users found</div>}
+        {results.map((person) => <button className="search-person" key={person.uid} onClick={() => setViewingProfile(person)}>
           <Avatar small name={person.displayName} photoURL={person.photoURL} online={isProfileOnline(person)} />
-          <span><strong>{person.displayName}</strong><small>{isProfileOnline(person) ? "Online" : "Start a conversation"}</small></span>
+          <span><strong>{person.displayName}</strong><small>@{person.username || defaultUsername(person.displayName, person.uid)} · {isProfileOnline(person) ? "Online" : "Offline"}</small></span>
           <MessageCircle size={16} />
         </button>)}
       </div>}
@@ -261,11 +336,35 @@ export default function ChatDashboard({ user, onLogout }: Props) {
       </section>
     </div>}
     {profileOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
-      <section className="group-modal">
+      <section className="group-modal profile-edit-modal">
         <header><div><span className="eyebrow">Your Gather profile</span><h2>Edit profile</h2></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close"><X size={20} /></button></header>
         <label>Display name<input value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={80} required /></label>
+        <label>Username<input value={profileUsername} onChange={(event) => setProfileUsername(event.target.value)} minLength={2} maxLength={32} pattern="[A-Za-z0-9._-]{2,32}" autoCapitalize="none" autoCorrect="off" required /></label>
+        <label>About<textarea value={profileAbout} onChange={(event) => setProfileAbout(event.target.value)} maxLength={300} placeholder="A little about you" /></label>
         <label>Profile picture URL<input type="url" value={profilePhoto} onChange={(event) => setProfilePhoto(event.target.value)} placeholder="https://…" /></label>
-        <button className="primary-button full-button" disabled={!profileName.trim() || savingProfile} onClick={() => void saveProfile()}>{savingProfile ? "Saving…" : "Save changes"}</button>
+        <label className="privacy-toggle"><input type="checkbox" checked={shareEmail} onChange={(event) => setShareEmail(event.target.checked)} /> Show my email to signed-in users</label>
+        <button className="primary-button full-button" disabled={!profileName.trim() || !/^[a-zA-Z0-9._-]{2,32}$/.test(profileUsername.trim()) || savingProfile} onClick={() => void saveProfile()}>{savingProfile ? "Saving…" : "Save changes"}</button>
+      </section>
+    </div>}
+    {viewingProfile && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewingProfile(null); }}>
+      <section className="group-modal user-profile-modal" role="dialog" aria-modal="true" aria-labelledby="user-profile-title">
+        <header><div><span className="eyebrow">Gather member</span><button className="icon-button" onClick={() => setViewingProfile(null)} aria-label="Close profile"><X size={20} /></button></div></header>
+        <div className="profile-hero">
+          <Avatar name={viewingProfile.displayName} photoURL={viewingProfile.photoURL} online={isProfileOnline(viewingProfile)} />
+          <h2 id="user-profile-title">{viewingProfile.displayName}</h2>
+          <span className="profile-username">@{viewingProfile.username || defaultUsername(viewingProfile.displayName, viewingProfile.uid)}</span>
+          <span className={`profile-presence ${isProfileOnline(viewingProfile) ? "is-online" : ""}`}>
+            <i />{isProfileOnline(viewingProfile) ? "Online" : "Offline"}
+          </span>
+        </div>
+        <div className="profile-details">
+          {viewingProfile.email && <div><span>Email</span><strong>{viewingProfile.email}</strong></div>}
+          <div><span>Last seen</span><strong>{isProfileOnline(viewingProfile) ? "Now" : formatLastSeen(viewingProfile.lastSeen)}</strong></div>
+          <div className="profile-about"><span>About</span><p>{viewingProfile.about?.trim() || "This person hasn't added an about section yet."}</p></div>
+        </div>
+        <button className="primary-button full-button chat-now-button" disabled={startingDirect} onClick={() => void startDirect(viewingProfile)}>
+          <MessageCircle size={17} />{startingDirect ? "Opening chat…" : "Chat Now"}
+        </button>
       </section>
     </div>}
   </main>;
