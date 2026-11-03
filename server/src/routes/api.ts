@@ -1,12 +1,16 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
-import { FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { UserRecord } from "firebase-admin/auth";
+import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { auth, db } from "../config/firebase.js";
 import { authenticate } from "../middleware/authenticate.js";
 
 export const api = Router();
 api.use(authenticate);
+
+let authUsersCache: { expiresAt: number; users: UserRecord[] } | undefined;
+let authUsersRequest: Promise<UserRecord[]> | undefined;
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
@@ -80,46 +84,112 @@ function displayNamePrefixes(displayName: string) {
   return [...prefixes];
 }
 
+function storedValueMatches(current: unknown, expected: unknown) {
+  if (Array.isArray(current) && Array.isArray(expected)) {
+    return current.length === expected.length
+      && current.every((value, index) => value === expected[index]);
+  }
+  return current === expected;
+}
+
+function matchesSearch(value: string | undefined, search: string) {
+  const normalized = value?.trim().toLowerCase();
+  return Boolean(normalized && (
+    normalized.startsWith(search)
+    || normalized.split(/\s+/).some((part) => part.startsWith(search))
+  ));
+}
+
+async function listAuthenticatedUsers() {
+  if (authUsersCache && authUsersCache.expiresAt > Date.now()) return authUsersCache.users;
+  if (authUsersRequest) return authUsersRequest;
+  authUsersRequest = (async () => {
+    const users: UserRecord[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await auth.listUsers(1000, pageToken);
+      users.push(...page.users);
+      pageToken = page.pageToken;
+    } while (pageToken);
+    authUsersCache = { users, expiresAt: Date.now() + 30_000 };
+    return users;
+  })();
+  try {
+    return await authUsersRequest;
+  } finally {
+    authUsersRequest = undefined;
+  }
+}
+
+async function syncProfileFromAuth(identity: UserRecord) {
+  const accountRef = db.collection("users").doc(identity.uid);
+  const publicRef = db.collection("publicProfiles").doc(identity.uid);
+  const [accountSnapshot, publicSnapshot] = await db.getAll(accountRef, publicRef);
+  const account = accountSnapshot.data() ?? {};
+  const publicProfile = publicSnapshot.data() ?? {};
+  const email = identity.email?.trim().toLowerCase();
+  const displayName = identity.displayName?.trim()
+    || (typeof account.displayName === "string" && account.displayName.trim())
+    || (email ? email.split("@")[0] : "")
+    || `Gather member ${identity.uid.slice(0, 6)}`;
+  const oldUsername = typeof account.username === "string" ? account.username
+    : typeof publicProfile.username === "string" ? publicProfile.username : "";
+  const username = /^[a-zA-Z0-9._-]{2,32}$/.test(oldUsername)
+    ? oldUsername
+    : defaultUsername(displayName, email ?? "", identity.uid);
+  const photoURL = identity.photoURL
+    || (typeof account.photoURL === "string" ? account.photoURL : "")
+    || (typeof publicProfile.photoURL === "string" ? publicProfile.photoURL : "");
+  const about = typeof publicProfile.about === "string" ? publicProfile.about
+    : typeof account.about === "string" ? account.about : "";
+  const online = typeof account.online === "boolean" ? account.online
+    : typeof publicProfile.online === "boolean" ? publicProfile.online : false;
+  const lastSeen = account.lastSeen ?? publicProfile.lastSeen ?? null;
+  const accountData = {
+    uid: identity.uid,
+    email: identity.email ?? "",
+    emailLower: email ?? "",
+    displayName,
+    displayNameLower: displayName.toLowerCase(),
+    displayNamePrefixes: displayNamePrefixes(displayName),
+    username,
+    usernameLower: username.toLowerCase(),
+    photoURL,
+    about,
+    online,
+    lastSeen,
+    ...(accountSnapshot.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+  };
+  const publicData = {
+    uid: identity.uid,
+    displayName,
+    displayNameLower: displayName.toLowerCase(),
+    username,
+    usernameLower: username.toLowerCase(),
+    photoURL,
+    about,
+    online,
+    lastSeen,
+  };
+  const accountNeedsRepair = Object.entries(accountData)
+    .some(([key, value]) => key !== "createdAt" && !storedValueMatches(account[key], value));
+  const publicNeedsRepair = Object.entries(publicData)
+    .some(([key, value]) => !storedValueMatches(publicProfile[key], value));
+  if (accountNeedsRepair || publicNeedsRepair) {
+    const batch = db.batch();
+    if (accountNeedsRepair) batch.set(accountRef, accountData, { merge: true });
+    if (publicNeedsRepair) batch.set(publicRef, publicData, { merge: true });
+    await batch.commit();
+  }
+  return { ...publicData, ...(typeof publicProfile.email === "string" ? { email: publicProfile.email } : {}) };
+}
+
 function isAuthUserNotFound(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error
     && error.code === "auth/user-not-found";
 }
 
 async function registeredProfile(uid: string) {
-  const accountRef = db.collection("users").doc(uid);
-  const [accountSnapshot, publicSnapshot] = await Promise.all([
-    accountRef.get(),
-    db.collection("publicProfiles").doc(uid).get(),
-  ]);
-  if (!accountSnapshot.exists || !publicSnapshot.exists) return null;
-
-  const account = accountSnapshot.data();
-  const publicProfile = publicSnapshot.data();
-  const username = typeof account?.username === "string" && /^[a-zA-Z0-9._-]{2,32}$/.test(account.username)
-    ? account.username
-    : null;
-  if (
-    !account
-    || !publicProfile
-    || !username
-    || account.uid !== uid
-    || publicProfile.uid !== uid
-    || typeof account.displayName !== "string"
-    || !account.displayName.trim()
-    || account.displayNameLower !== account.displayName.toLowerCase()
-    || typeof account.email !== "string"
-    || !z.string().email().safeParse(account.email).success
-    || typeof account.emailLower !== "string"
-    || account.email.toLowerCase() !== account.emailLower
-    || typeof account.online !== "boolean"
-    || typeof publicProfile.displayName !== "string"
-    || publicProfile.displayName !== account.displayName
-    || publicProfile.displayNameLower !== account.displayName.toLowerCase()
-    || publicProfile.username !== username
-    || publicProfile.usernameLower !== username.toLowerCase()
-    || typeof publicProfile.online !== "boolean"
-  ) return null;
-
   let identity;
   try {
     identity = await auth.getUser(uid);
@@ -132,21 +202,10 @@ async function registeredProfile(uid: string) {
     || identity.disabled
     || !identity.emailVerified
     || !identity.email
-    || identity.email.toLowerCase() !== account.emailLower
   ) return null;
-
-  return {
-    uid,
-    displayName: account.displayName.trim(),
-    username,
-    photoURL: typeof account.photoURL === "string" ? account.photoURL : "",
-    about: typeof publicProfile.about === "string" ? publicProfile.about : "",
-    ...(typeof publicProfile.email === "string" && publicProfile.email
-      ? { email: publicProfile.email }
-      : {}),
-    online: account.online,
-    lastSeen: account.lastSeen,
-  };
+  const profile = await syncProfileFromAuth(identity);
+  if (!z.string().email().safeParse(identity.email).success) return null;
+  return profile;
 }
 
 api.post("/profile", async (req, res) => {
@@ -194,6 +253,7 @@ api.post("/profile", async (req, res) => {
     lastSeen: FieldValue.serverTimestamp(),
   }, { merge: true });
   await profileBatch.commit();
+  authUsersCache = undefined;
   res.json({ ok: true });
 });
 
@@ -202,25 +262,63 @@ api.get("/users", async (req, res) => {
   if (search.length < 2) { res.json([]); return; }
   const prefix = search.startsWith("@") ? search.slice(1) : search;
   if (prefix.length < 2) { res.json([]); return; }
-  const fields = ["usernameLower", "displayNameLower", "emailLower"] as const;
-  const matches = await Promise.all([
-    ...fields.map((field) => db.collection("users")
-      .orderBy(field).startAt(prefix).endAt(`${prefix}\uf8ff`).limit(10).get()),
-    db.collection("users").where("displayNamePrefixes", "array-contains", prefix).limit(10).get(),
-  ]);
-  const candidates = new Map<string, QueryDocumentSnapshot>();
-  for (const snapshot of matches) {
-    for (const account of snapshot.docs) {
-      if (account.id !== req.user!.uid && candidates.size < 30) candidates.set(account.id, account);
+  try {
+    const [identities, ...profileMatches] = await Promise.all([
+      listAuthenticatedUsers(),
+      ...([
+        "usernameLower",
+        "displayNameLower",
+        "emailLower",
+        "username",
+        "displayName",
+        "email",
+      ] as const).map((field) => db.collection("users")
+        .orderBy(field).startAt(prefix).endAt(`${prefix}\uf8ff`).get()),
+      db.collection("users").where("displayNamePrefixes", "array-contains", prefix).get(),
+    ]);
+    const identitiesByUid = new Map(identities
+      .filter((identity) => !identity.disabled && identity.emailVerified && identity.email)
+      .map((identity) => [identity.uid, identity]));
+    const candidates = new Set<string>();
+    for (const identity of identitiesByUid.values()) {
+      const fallbackUsername = defaultUsername(identity.displayName ?? "", identity.email ?? "", identity.uid);
+      if (matchesSearch(identity.displayName, prefix)
+        || matchesSearch(identity.email, prefix)
+        || matchesSearch(fallbackUsername, prefix)) {
+        candidates.add(identity.uid);
+      }
     }
+    for (const snapshot of profileMatches) {
+      for (const account of snapshot.docs) {
+        if (account.id !== req.user!.uid && identitiesByUid.has(account.id)) candidates.add(account.id);
+      }
+    }
+    candidates.delete(req.user!.uid);
+
+    const profiles = await Promise.all([...candidates].map(async (uid) => {
+      const identity = identitiesByUid.get(uid);
+      if (!identity) return null;
+      const profile = await syncProfileFromAuth(identity);
+      if (!matchesSearch(profile.username, prefix)
+        && !matchesSearch(profile.displayName, prefix)
+        && !matchesSearch(identity.email, prefix)) return null;
+      return {
+        ...profile,
+        lastSeen: profile.lastSeen && typeof profile.lastSeen === "object" && "toDate" in profile.lastSeen
+          ? (profile.lastSeen as { toDate: () => Date }).toDate().toISOString()
+          : null,
+      };
+    }));
+    res.json(profiles.filter((profile) => profile !== null));
+  } catch (error) {
+    console.error("Firebase user search failed:", {
+      uid: req.user!.uid,
+      search: prefix,
+      code: typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-  const users = await Promise.all([...candidates.keys()].map((uid) => registeredProfile(uid)));
-  res.json(users.filter((profile) => profile !== null).slice(0, 20).map((profile) => ({
-    ...profile,
-    lastSeen: profile.lastSeen && typeof profile.lastSeen === "object" && "toDate" in profile.lastSeen
-      ? (profile.lastSeen as { toDate: () => Date }).toDate().toISOString()
-      : null,
-  })));
 });
 
 api.post("/session/logout", async (req, res) => {

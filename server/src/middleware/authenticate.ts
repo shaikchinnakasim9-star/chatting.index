@@ -24,7 +24,25 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
     req.user = { uid: decoded.uid, ...(decoded.email ? { email: decoded.email } : {}) };
     next();
-  } catch {
-    res.status(401).json({ error: "Your session is invalid or expired. Please sign in again." });
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String(error.code)
+      : "unknown";
+    if ([
+      "auth/argument-error",
+      "auth/id-token-expired",
+      "auth/id-token-revoked",
+      "auth/invalid-id-token",
+      "auth/user-disabled",
+    ].includes(code)) {
+      res.status(401).json({ error: "Your session is invalid or expired. Please sign in again." });
+      return;
+    }
+
+    console.error("Firebase ID token verification is unavailable:", {
+      code,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    res.status(503).json({ error: "Authentication service is temporarily unavailable." });
   }
 }

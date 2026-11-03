@@ -41,7 +41,7 @@ Set the environment values before opening the app. Vite serves the client at `ht
 - Email/password registration and sign-in, email verification, password reset, and logout
 - Firebase ID-token JWT bearer authentication on API routes; revoked and expired tokens are rejected, and logout revokes refresh tokens
 - Profile initialization and presence heartbeats with stale-online detection
-- Search verified registered accounts by username, full name, or email; open profiles with presence, last seen, bio, and opt-in email visibility, then open a private one-to-one chat
+- Search enabled, email-verified Firebase Authentication accounts by username, full name, or email; missing/stale Firestore profiles are repaired from the authenticated Firebase account, and the current user is excluded
 - Real-time conversation and message listeners, delivered/read receipts, typing indicators, and message search
 - Text, voice, image, PDF, and Word-file messages (maximum 10 MB; voice notes capped at 2 minutes); edit/delete own text messages
 - Group creation with name and picture URL, live member listing, and admin-authorized member/admin promotion and removal

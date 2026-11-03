@@ -17,8 +17,14 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       ...options.headers,
     },
   });
-  if (response.status === 401) throw new Error("Your session expired. Please sign in again.");
+  if (response.status === 401) {
+    console.error("Gather API rejected the authenticated request:", { path, status: response.status });
+    throw new Error("Your session expired. Please sign in again.");
+  }
   const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "The request could not be completed.");
+  if (!response.ok) {
+    console.error("Gather API request failed:", { path, status: response.status, error: data.error });
+    throw new Error(data.error || "The request could not be completed.");
+  }
   return data;
 }
