@@ -95,8 +95,25 @@ For an end-to-end smoke test, open the client in two separate browser profiles, 
 1. Build the client with `npm run build`.
 2. Deploy Firestore rules, Storage rules, and indexes with the Firebase CLI as above.
 3. Deploy `client/dist` to Firebase Hosting using `npx firebase-tools deploy --only hosting`, or another static host with SPA fallback to `index.html`. Set the production `VITE_*` values at build time.
-4. Deploy the Express server separately to Cloud Run, App Engine, or another Node.js host. Set `CLIENT_ORIGIN`, `PORT`, and `FIREBASE_PROJECT_ID`; attach a least-privilege service account with Firebase Admin access. Set `VITE_API_URL` to the deployed API origin before building the client.
+4. Deploy the Express server separately to Cloud Run, App Engine, Render, or another Node.js host. Set `CLIENT_ORIGIN`, `PORT`, and `FIREBASE_PROJECT_ID`; attach a least-privilege service account with Firebase Admin access. Set `VITE_API_URL` to the deployed API origin before building the client.
 5. Configure HTTPS, production Firebase authorized domains, API CORS origin, backups, monitoring, and Firebase billing/quotas before opening the service to users.
+
+## Deploy to Render
+
+The root `render.yaml` defines a Render Blueprint with two services: the Express API and the Vite static site. Push this project to a GitHub/GitLab repository, then create a Blueprint in [Render](https://dashboard.render.com/select-repo) and select that repository. Render will build both services and provision their host URLs.
+
+Before the API can start, add the Firebase Admin service-account JSON to the `gather-api` service as a **Secret File** named `firebase-admin.json` at `/etc/secrets/firebase-admin.json`. This file contains private credentials: never commit it, put it in a normal environment variable, or expose it to the client. The blueprint configures `GOOGLE_APPLICATION_CREDENTIALS` to that secret-file path.
+
+When creating the Blueprint, enter the Firebase web app values from your Firebase project in the `gather-client` environment prompts: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID`. These are public web-app config values, not Admin credentials.
+
+The blueprint connects the client API URL and API CORS origin to each other's Render host. After the first deployment:
+
+1. In Firebase Authentication settings, add the deployed client hostname to **Authorized domains** and ensure Email/Password sign-in is enabled.
+2. Deploy Firestore and Storage rules/indexes with the Firebase CLI from a trusted local machine.
+3. Wait for the API `/health` check and the static site deployment to become live. The `gather-client` Render URL shown in its service dashboard is the public app link.
+4. If `CLIENT_ORIGIN` or the API host has not been resolved by Render on the first deploy, set `CLIENT_ORIGIN` to the client service's exact `https://...onrender.com` origin and redeploy the API.
+
+Render deployment is not complete until the repository is connected, both services are live, and the Firebase Admin Secret File and web configuration are set.
 
 ## Production considerations
 
