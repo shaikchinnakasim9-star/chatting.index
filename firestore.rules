@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isMember(conversationId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.members;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
+    match /publicProfiles/{uid} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    match /conversations/{conversationId} {
+      allow get, list: if signedIn() && request.auth.uid in resource.data.members;
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow get, list: if isMember(conversationId);
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+  }
+}
