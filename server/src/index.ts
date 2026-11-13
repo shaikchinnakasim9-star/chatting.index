@@ -9,9 +9,23 @@ import { errorHandler } from "./middleware/errors.js";
 const app = express();
 app.disable("x-powered-by");
 app.use(helmet());
-const configuredOrigin = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
-const clientOrigin = /^https?:\/\//i.test(configuredOrigin) ? configuredOrigin : `https://${configuredOrigin}`;
-app.use(cors({ origin: clientOrigin }));
+const configuredOrigins = ([process.env.CLIENT_ORIGIN, process.env.CLIENT_ORIGINS]
+  .filter((origin): origin is string => Boolean(origin?.trim()))
+  .join(",") || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+  .map((origin) => (/^https?:\/\//i.test(origin) ? origin : `https://${origin}`).replace(/\/+$/, "").toLowerCase());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || configuredOrigins.includes(origin.replace(/\/+$/, "").toLowerCase())) {
+      callback(null, true);
+      return;
+    }
+    console.error("Blocked API request from an unconfigured browser origin:", origin);
+    callback(new Error("This browser origin is not allowed. Add it to CLIENT_ORIGIN or CLIENT_ORIGINS."));
+  },
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 app.get("/health", (_req, res) => res.json({ ok: true }));

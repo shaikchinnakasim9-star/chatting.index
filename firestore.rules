@@ -2,44 +2,249 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && activeAccount();
+    }
+
+    function authenticated() {
+      return request.auth != null;
+    }
+
+    function activeAccount() {
+      let accountPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return !exists(accountPath)
+        || !get(accountPath).data.keys().hasAny(['accountExpiresAt'])
+        || get(accountPath).data.accountExpiresAt > request.time;
+    }
+
+    function activeSession(data) {
+      return !data.keys().hasAny(['expiresAt']) || data.expiresAt > request.time;
+    }
+
+    function validUserProfile(uid) {
+      return request.resource.data.keys().hasOnly([
+          'uid',
+          'username',
+          'usernameLower',
+          'fullName',
+          'fullNameLower',
+          'fullNamePrefixes',
+          'displayName',
+          'displayNameLower',
+          'displayNamePrefixes',
+          'email',
+          'emailLower',
+          'profilePicture',
+          'photoURL',
+          'about',
+          'isOnline',
+          'online',
+          'lastSeen',
+          'createdAt',
+          'accountCreatedAt',
+          'accountExpiresAt',
+          'accountLifetimeDays',
+          'accountLifetimeConfigured',
+          'accountExpirationNoticeAt',
+          'defaultMessageExpirationSeconds',
+          'defaultSessionExpirationSeconds'
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.username is string
+        && request.resource.data.fullName is string
+        && request.resource.data.email is string
+        && request.resource.data.profilePicture is string
+        && request.resource.data.isOnline is bool
+        && request.resource.data.lastSeen is timestamp
+        && request.resource.data.createdAt is timestamp
+        && (!request.resource.data.keys().hasAny(['accountCreatedAt'])
+          || request.resource.data.accountCreatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['accountExpiresAt'])
+          || request.resource.data.accountExpiresAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['accountLifetimeDays'])
+          || request.resource.data.accountLifetimeDays in [7, 30, 90, 180, 365])
+        && (!request.resource.data.keys().hasAny(['accountLifetimeConfigured'])
+          || request.resource.data.accountLifetimeConfigured is bool)
+        && (!request.resource.data.keys().hasAny(['accountExpirationNoticeAt'])
+          || request.resource.data.accountExpirationNoticeAt is timestamp);
+    }
+
+    function validPublicProfile(uid) {
+      return request.resource.data.keys().hasOnly([
+          'uid',
+          'username',
+          'usernameLower',
+          'fullName',
+          'fullNameLower',
+          'displayName',
+          'displayNameLower',
+          'photoURL',
+          'profilePicture',
+          'about',
+          'isOnline',
+          'online',
+          'lastSeen',
+          'createdAt'
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.username is string
+        && request.resource.data.fullName is string
+        && request.resource.data.profilePicture is string
+        && request.resource.data.isOnline is bool
+        && request.resource.data.lastSeen is timestamp
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function validPrivateProfileUpdate(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return request.resource.data.uid == uid
+        && changed.hasOnly([
+          'uid',
+          'username',
+          'usernameLower',
+          'fullName',
+          'fullNameLower',
+          'fullNamePrefixes',
+          'displayName',
+          'displayNameLower',
+          'displayNamePrefixes',
+          'email',
+          'emailLower',
+          'profilePicture',
+          'photoURL',
+          'about',
+          'isOnline',
+          'online',
+          'lastSeen',
+          'createdAt'
+        ])
+        && (!changed.hasAny(['uid']) || !resource.data.keys().hasAny(['uid']))
+        && (!changed.hasAny(['createdAt'])
+          || !resource.data.keys().hasAny(['createdAt'])
+          || !(resource.data.createdAt is timestamp))
+        && (!changed.hasAny(['email']) || request.resource.data.email == request.auth.token.email)
+        && (!changed.hasAny(['isOnline']) || !resource.data.keys().hasAny(['isOnline']))
+        && (!changed.hasAny(['online']) || !resource.data.keys().hasAny(['online']))
+        && (!changed.hasAny(['lastSeen']) || !resource.data.keys().hasAny(['lastSeen']));
+    }
+
+    function validPublicProfileUpdate(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return request.resource.data.uid == uid
+        && changed.hasOnly([
+          'uid',
+          'username',
+          'usernameLower',
+          'fullName',
+          'fullNameLower',
+          'displayName',
+          'displayNameLower',
+          'photoURL',
+          'profilePicture',
+          'about',
+          'email',
+          'emailLower',
+          'isOnline',
+          'online',
+          'lastSeen',
+          'createdAt'
+        ])
+        && (!changed.hasAny(['uid']) || !resource.data.keys().hasAny(['uid']))
+        && (!changed.hasAny(['createdAt'])
+          || !resource.data.keys().hasAny(['createdAt'])
+          || !(resource.data.createdAt is timestamp))
+        && (!changed.hasAny(['email'])
+          || (!request.resource.data.keys().hasAny(['email']) && resource.data.keys().hasAny(['email'])))
+        && (!changed.hasAny(['emailLower'])
+          || (!request.resource.data.keys().hasAny(['emailLower']) && resource.data.keys().hasAny(['emailLower'])))
+        && (!changed.hasAny(['isOnline']) || !resource.data.keys().hasAny(['isOnline']))
+        && (!changed.hasAny(['online']) || !resource.data.keys().hasAny(['online']))
+        && (!changed.hasAny(['lastSeen']) || !resource.data.keys().hasAny(['lastSeen']));
     }
 
     function isMember(conversationId) {
       return signedIn()
+        && activeSession(get(/databases/$(database)/documents/conversations/$(conversationId)).data)
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.members;
     }
 
+    function isChatParticipant(chatId) {
+      return signedIn()
+        && activeSession(get(/databases/$(database)/documents/chats/$(chatId)).data)
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
     match /users/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid;
-      allow list, create, update, delete: if false;
+      allow get: if authenticated() && request.auth.uid == uid && activeAccount();
+      allow list: if false;
+      allow create: if authenticated()
+        && request.auth.uid == uid
+        && validUserProfile(uid)
+        && !request.resource.data.keys().hasAny([
+          'accountCreatedAt', 'accountExpiresAt', 'accountLifetimeDays',
+          'accountLifetimeConfigured', 'accountExpirationNoticeAt',
+          'defaultMessageExpirationSeconds',
+          'defaultSessionExpirationSeconds'
+        ])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.isOnline == false;
+      allow update: if authenticated()
+        && request.auth.uid == uid
+        && activeAccount()
+        && (!resource.data.keys().hasAny(['uid']) || resource.data.uid == uid)
+        && validUserProfile(uid)
+        && validPrivateProfileUpdate(uid)
+        && (!request.resource.data.keys().hasAny(['email'])
+          || request.resource.data.email == request.auth.token.email)
+        && (!resource.data.keys().hasAny(['createdAt'])
+          || !(resource.data.createdAt is timestamp)
+          || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if false;
     }
 
     match /publicProfiles/{uid} {
-      allow get: if signedIn()
-        && resource.data.uid == uid
-        && resource.data.keys().hasOnly([
-          'uid',
-          'displayName',
-          'displayNameLower',
-          'username',
-          'usernameLower',
-          'photoURL',
-          'about',
-          'email',
-          'online',
-          'lastSeen'
-        ]);
-      allow list: if false;
-      allow create, update, delete: if false;
+      allow get: if authenticated() && request.auth.uid == uid && activeAccount()
+        || signedIn() && resource.data.uid == uid;
+      allow list: if signedIn();
+      allow create: if authenticated()
+        && request.auth.uid == uid
+        && validPublicProfile(uid)
+        && request.resource.data.isOnline == false;
+      allow update: if authenticated()
+        && request.auth.uid == uid
+        && activeAccount()
+        && (!resource.data.keys().hasAny(['uid']) || resource.data.uid == uid)
+        && validPublicProfile(uid)
+        && validPublicProfileUpdate(uid)
+        && (!resource.data.keys().hasAny(['createdAt'])
+          || !(resource.data.createdAt is timestamp)
+          || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if false;
     }
 
     match /conversations/{conversationId} {
-      allow get, list: if signedIn() && request.auth.uid in resource.data.members;
+      allow get, list: if signedIn()
+        && activeSession(resource.data)
+        && request.auth.uid in resource.data.members;
       allow create, update, delete: if false;
 
       match /messages/{messageId} {
-        allow get, list: if isMember(conversationId);
+        allow get, list: if isMember(conversationId)
+          && (!resource.data.keys().hasAny(['expiresAt']) || resource.data.expiresAt > request.time);
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /chats/{chatId} {
+      allow get, list: if signedIn()
+        && activeSession(resource.data)
+        && request.auth.uid in resource.data.participants;
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow get, list: if isChatParticipant(chatId)
+          && (!resource.data.keys().hasAny(['expiresAt']) || resource.data.expiresAt > request.time);
         allow create, update, delete: if false;
       }
     }

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111a2b" />
+    <meta
+      name="description"
+      content="A tactile, reusable Liquid Glass button component in a polished interactive demo."
+    />
+    <title>Liquid Glass — Button study</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./script.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient--one" aria-hidden="true"></div>
+    <div class="ambient ambient--two" aria-hidden="true"></div>
+    <div class="ambient ambient--three" aria-hidden="true"></div>
+
+    <div class="site-shell">
+      <header class="topbar">
+        <a class="wordmark" href="#" aria-label="Luma, home">
+          <span class="wordmark__symbol" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M16 3.5 18.9 13l9.6 3-9.6 2.9-2.9 9.6-2.9-9.6-9.6-2.9 9.6-3L16 3.5Z" fill="currentColor" />
+            </svg>
+          </span>
+          <span>luma<span class="wordmark__period">.</span></span>
+        </a>
+        <span class="topbar__label"><span class="status-dot"></span> Interface study <span class="topbar__slash">/</span> 001</span>
+        <a class="topbar__link" href="#button-library">Explore the component <span aria-hidden="true">↘</span></a>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero__copy">
+            <p class="eyebrow"><span class="eyebrow__line"></span> A softer kind of interaction</p>
+            <h1 id="hero-title">A little more<br />light in every <span>click.</span></h1>
+            <p class="hero__description">
+              A tactile, light-catching button built from the quiet magic of glass. Move your cursor, take it for a spin.
+            </p>
+            <div class="hero__actions">
+              <button class="glass-button glass-button--primary glass-button--large" type="button" data-glass data-demo="primary">
+                <span>Explore the feeling</span>
+                <svg class="button-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M4.25 10h11.5m-4.75-4.75L15.75 10 11 14.75" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button class="glass-button glass-button--secondary glass-button--large" type="button" data-glass data-demo="secondary">
+                <svg class="button-icon button-icon--leading" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M10 3.5v13m-6.5-6.5h13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                </svg>
+                <span>See how it works</span>
+              </button>
+            </div>
+            <div class="hero__caption">
+              <span class="caption-mark" aria-hidden="true">✳</span>
+              <span>Move your pointer over a button</span>
+              <span class="caption-dash" aria-hidden="true"></span>
+              <span>then press and hold</span>
+            </div>
+          </div>
+
+          <div class="hero__art" aria-hidden="true">
+            <div class="orbit orbit--outer"></div>
+            <div class="orbit orbit--inner"></div>
+            <div class="glass-orb">
+              <div class="glass-orb__shine"></div>
+              <div class="glass-orb__core"></div>
+              <div class="glass-orb__glint"></div>
+            </div>
+            <div class="art-label art-label--top"><span></span> REFRACTED LIGHT</div>
+            <div class="art-label art-label--bottom">SOFTNESS, MADE TANGIBLE <span>01 — 03</span></div>
+            <div class="art-spark art-spark--one">✳</div>
+            <div class="art-spark art-spark--two">·</div>
+          </div>
+        </section>
+
+        <section class="library" id="button-library" aria-labelledby="library-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span class="eyebrow__line"></span> Made to be touched</p>
+              <h2 id="library-title">One component.<br /><span>Many little moments.</span></h2>
+            </div>
+            <p class="section-heading__note">Thoughtfully tuned for the everyday.<br />Try each variation below.</p>
+          </div>
+
+          <div class="showcase-grid">
+            <article class="showcase-card showcase-card--wide">
+              <div class="card-heading">
+                <div><span class="card-index">01</span><h3>Choose your moment</h3></div>
+                <span class="card-hint">PRIMARY &amp; SECONDARY</span>
+              </div>
+              <div class="button-stage button-stage--pair">
+                <button class="glass-button glass-button--primary" type="button" data-glass data-demo="primary">
+                  <span>Get started</span>
+                  <svg class="button-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4.25 10h11.5m-4.75-4.75L15.75 10 11 14.75" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+                <button class="glass-button glass-button--secondary" type="button" data-glass data-demo="secondary">
+                  <span>Maybe later</span>
+                </button>
+              </div>
+              <p class="card-footnote">Two distinct expressions, one continuous surface.</p>
+            </article>
+
+            <article class="showcase-card showcase-card--accent">
+              <div class="card-heading">
+                <div><span class="card-index">02</span><h3>A touch of color</h3></div>
+                <span class="card-hint">CUSTOM TINT</span>
+              </div>
+              <div class="button-stage">
+                <button
+                  class="glass-button glass-button--primary glass-button--tinted"
+                  style="--glass-tint: 111, 154, 255"
+                  type="button"
+                  data-glass
+                  data-demo="tinted"
+                >
+                  <span>Make it yours</span>
+                  <svg class="button-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4.25 10h11.5m-4.75-4.75L15.75 10 11 14.75" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+              </div>
+              <p class="card-footnote">Tinted with a single CSS variable.</p>
+            </article>
+
+            <article class="showcase-card">
+              <div class="card-heading">
+                <div><span class="card-index">03</span><h3>Just the essentials</h3></div>
+                <span class="card-hint">ICON BUTTONS</span>
+              </div>
+              <div class="button-stage button-stage--icons">
+                <button class="glass-button glass-button--icon" type="button" aria-label="Add item" data-glass data-demo="add item">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3.75v12.5M3.75 10h12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+                </button>
+                <button class="glass-button glass-button--icon glass-button--icon-muted" type="button" aria-label="Favorite" data-glass data-demo="favorite">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 17s-6.25-3.78-6.25-8.3A3.45 3.45 0 0 1 10 6.85a3.45 3.45 0 0 1 6.25 1.85C16.25 13.22 10 17 10 17Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /></svg>
+                </button>
+                <button class="glass-button glass-button--icon" type="button" aria-label="More options" data-glass data-demo="more options">
+                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.25" cy="10" r="1.15" /><circle cx="10" cy="10" r="1.15" /><circle cx="15.75" cy="10" r="1.15" /></svg>
+                </button>
+              </div>
+              <p class="card-footnote">Compact, considered, and easy to reach.</p>
+            </article>
+
+            <article class="showcase-card showcase-card--wide">
+              <div class="card-heading">
+                <div><span class="card-index">04</span><h3>A size for every story</h3></div>
+                <span class="card-hint">THREE SIZES</span>
+              </div>
+              <div class="button-stage button-stage--sizes">
+                <button class="glass-button glass-button--primary glass-button--small" type="button" data-glass data-demo="small button"><span>Small</span></button>
+                <button class="glass-button glass-button--primary" type="button" data-glass data-demo="medium button"><span>Medium</span></button>
+                <button class="glass-button glass-button--primary glass-button--large" type="button" data-glass data-demo="large button"><span>Large</span></button>
+              </div>
+              <p class="card-footnote">A natural rhythm, from compact to confident.</p>
+            </article>
+
+            <article class="showcase-card showcase-card--disabled">
+              <div class="card-heading">
+                <div><span class="card-index">05</span><h3>And when it’s not time</h3></div>
+                <span class="card-hint">DISABLED</span>
+              </div>
+              <div class="button-stage">
+                <button class="glass-button glass-button--primary" type="button" disabled aria-disabled="true" data-glass>
+                  <span>Not available</span>
+                  <svg class="button-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4.25 10h11.5m-4.75-4.75L15.75 10 11 14.75" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                </button>
+              </div>
+              <p class="card-footnote">Quietly communicates that it’s taking a pause.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="specimen" aria-label="Component details">
+          <div class="specimen__intro">
+            <span class="specimen__index">THE DETAILS</span>
+            <span>Designed to feel<br />like light, not UI.</span>
+          </div>
+          <div class="specimen__item"><span class="specimen__icon">◌</span><span>Real-time<br /><strong>light response</strong></span></div>
+          <div class="specimen__item"><span class="specimen__icon">⌘</span><span>Ready for<br /><strong>every input</strong></span></div>
+          <div class="specimen__item"><span class="specimen__icon">◒</span><span>Thoughtful<br /><strong>motion &amp; fallback</strong></span></div>
+          <span class="specimen__endmark">✳</span>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>© 2025 LUMA INTERFACE STUDIES</span>
+        <span>MADE OF LIGHT, A LITTLE BIT OF CODE <span class="footer__spark">✳</span></span>
+      </footer>
+    </div>
+
+    <div class="demo-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

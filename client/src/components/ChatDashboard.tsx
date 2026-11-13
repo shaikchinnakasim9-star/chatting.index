@@ -5,12 +5,41 @@ import {
 } from "lucide-react";
 import { updateProfile, type User } from "firebase/auth";
 import { api } from "../services/api";
-import { isProfileOnline, watchConversations, watchNotifications, watchProfiles, type Conversation, type NotificationItem, type Profile } from "../services/chat";
+import { isProfileOnline, watchConversations, watchNotifications, watchProfiles, watchPublicProfiles, type Conversation, type NotificationItem, type Profile } from "../services/chat";
+import { syncUserProfile } from "../services/profile";
 import HelpBotPanel from "./HelpBotPanel";
 import MessagePanel from "./MessagePanel";
 
-type Props = { user: User; onLogout: () => Promise<void> };
+type Props = {
+  user: User;
+  onLogout: () => Promise<void>;
+  presenceError?: string;
+  onClearPresenceError?: () => void;
+};
 type SearchUser = Profile;
+const dayMilliseconds = 24 * 60 * 60 * 1000;
+type ExpirationSettings = {
+  defaultMessageExpirationSeconds: number;
+  defaultSessionExpirationSeconds: number;
+  accountCreatedAt: number | null;
+  accountExpiresAt: number | null;
+  accountLifetimeDays: number;
+};
+
+const messageExpirationOptions = [
+  [60, "1 minute"], [300, "5 minutes"], [1800, "30 minutes"],
+  [3600, "1 hour"], [86400, "24 hours"], [604800, "7 days"],
+] as const;
+const sessionExpirationOptions = [
+  [3600, "1 hour"], [86400, "24 hours"], [604800, "7 days"], [2592000, "30 days"],
+] as const;
+const emptyExpirationSettings: ExpirationSettings = {
+  defaultMessageExpirationSeconds: 604800,
+  defaultSessionExpirationSeconds: 2592000,
+  accountCreatedAt: null,
+  accountExpiresAt: null,
+  accountLifetimeDays: 365,
+};
 
 function initials(name?: string) {
   return (name || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -34,20 +63,21 @@ function Avatar({ name, photoURL, online, small = false }: { name?: string; phot
   </span>;
 }
 
-export default function ChatDashboard({ user, onLogout }: Props) {
+export default function ChatDashboard({ user, onLogout, presenceError, onClearPresenceError }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [active, setActive] = useState<Conversation | null>(null);
   const [helpBotOpen, setHelpBotOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<SearchUser[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [directory, setDirectory] = useState<SearchUser[]>([]);
+  const [directoryLoaded, setDirectoryLoaded] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [error, setError] = useState("");
   const [showGroup, setShowGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupPhoto, setGroupPhoto] = useState("");
   const [groupMembers, setGroupMembers] = useState<string[]>([]);
+  const [groupSessionExpirationSeconds, setGroupSessionExpirationSeconds] = useState(2592000);
   const [notifications, setNotifications] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationSupported] = useState(typeof window !== "undefined" && "Notification" in window);
@@ -57,25 +87,57 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   const [profileUsername, setProfileUsername] = useState(defaultUsername(user.displayName || user.email || "", user.uid));
   const [profilePhoto, setProfilePhoto] = useState("");
   const [profileAbout, setProfileAbout] = useState("");
-  const [shareEmail, setShareEmail] = useState(false);
   const [viewingProfile, setViewingProfile] = useState<SearchUser | null>(null);
   const [startingDirect, setStartingDirect] = useState(false);
+  const [directStartError, setDirectStartError] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [profileNotice, setProfileNotice] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expirationSettings, setExpirationSettings] = useState(emptyExpirationSettings);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [expirationNotice, setExpirationNotice] = useState("");
   const lastNotified = useRef<string | null>(null);
 
   useEffect(() => watchConversations(user, setConversations, (issue) => setError(issue.message)), [user]);
   useEffect(() => {
+    let active = true;
+    void api<Omit<ExpirationSettings, "accountCreatedAt" | "accountExpiresAt"> & {
+      accountCreatedAt: number | null;
+      accountExpiresAt: number | null;
+    }>("/settings").then((settings) => {
+      if (active) {
+        setExpirationSettings(settings);
+        setGroupSessionExpirationSeconds(settings.defaultSessionExpirationSeconds);
+      }
+    }).catch((issue: unknown) => {
+      if (active) setError(issue instanceof Error ? issue.message : "Could not load expiration settings.");
+    });
+    return () => { active = false; };
+  }, [user.uid]);
+  useEffect(() => {
     let firstSnapshot = true;
+    const showExpirationNotice = (item: NotificationItem) => {
+      setExpirationNotice(item.message);
+      if (!item.read) {
+        void api(`/notifications/${item.id}/read`, { method: "POST" })
+          .catch((issue: unknown) => setError(issue instanceof Error ? issue.message : "Could not mark the expiration notice as read."));
+      }
+    };
     return watchNotifications(user.uid, (items: NotificationItem[]) => {
       setUnreadNotifications(items.filter((item) => !item.read).length);
       if (firstSnapshot) {
         firstSnapshot = false;
         lastNotified.current = items.find((item) => !item.read)?.id ?? null;
+        const existingNotice = items.find((item) => !item.read && item.type && item.type !== "message");
+        if (existingNotice) showExpirationNotice(existingNotice);
         return;
       }
       const newest = items.find((item) => !item.read);
-      if (newest && newest.id !== lastNotified.current && notifications && "Notification" in window) {
-        new Notification("New message on Gather", { body: newest.message });
+      if (newest && newest.id !== lastNotified.current) {
+        if (newest.type && newest.type !== "message") showExpirationNotice(newest);
+        if (notifications && "Notification" in window) {
+          new Notification(newest.type === "accountExpiring" ? "Gather account expiration" : newest.type ? "Gather expiration notice" : "New message on Gather", { body: newest.message });
+        }
       }
       if (newest) lastNotified.current = newest.id;
     }, (issue) => setError(issue.message));
@@ -88,51 +150,35 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   }, (issue) => setError(issue.message)), [profileIds.join("|")]);
 
   useEffect(() => {
-    const term = search.trim();
-    let activeRequest = true;
-    let timer: number | undefined;
+    setDirectoryLoaded(false);
     setSearchError("");
-    if (term.length < 2) {
-      setResults([]);
-      setBusy(false);
-      return () => { activeRequest = false; };
-    }
+    return watchPublicProfiles((items) => {
+      setDirectory(items);
+      setDirectoryLoaded(true);
+      setSearchError("");
+    }, (issue) => {
+      setDirectoryLoaded(true);
+      setSearchError(issue.message);
+    });
+  }, [user.uid]);
 
-    setResults([]);
-    setBusy(true);
-    const refreshResults = async () => {
-      try {
-        const items = await api<SearchUser[]>(`/users?search=${encodeURIComponent(term)}`);
-        if (activeRequest) {
-          setResults(items.filter((item) => item.uid !== user.uid));
-          setSearchError("");
-        }
-      } catch (issue) {
-        if (activeRequest) {
-          setResults([]);
-          setSearchError(issue instanceof Error ? issue.message : "Could not search registered users.");
-        }
-      } finally {
-        if (activeRequest) {
-          setBusy(false);
-          timer = window.setTimeout(() => void refreshResults(), 10_000);
-        }
-      }
-    };
-
-    timer = window.setTimeout(() => void refreshResults(), 250);
-    return () => {
-      activeRequest = false;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [search, user.uid]);
+  const results = useMemo(() => {
+    const term = search.trim().replace(/^@/, "").toLowerCase();
+    if (term.length < 2) return [];
+    return directory.filter((profile) => {
+      if (profile.uid === user.uid) return false;
+      const username = profile.username?.toLowerCase() ?? "";
+      const name = (profile.fullName || profile.displayName).toLowerCase();
+      return username.includes(term) || name.includes(term);
+    });
+  }, [directory, search, user.uid]);
 
   useEffect(() => {
     if (!viewingProfile) return;
     const latest = results.find((profile) => profile.uid === viewingProfile.uid);
     if (latest) setViewingProfile(latest);
-    else if (!busy && search.trim().length >= 2) setViewingProfile(null);
-  }, [results, viewingProfile?.uid, busy, search]);
+    else if (directoryLoaded && search.trim().length >= 2) setViewingProfile(null);
+  }, [results, viewingProfile?.uid, directoryLoaded, search]);
 
   useEffect(() => {
     if (!notificationSupported) return;
@@ -141,21 +187,27 @@ export default function ChatDashboard({ user, onLogout }: Props) {
 
   async function startDirect(target: SearchUser) {
     setError("");
+    setDirectStartError("");
     setStartingDirect(true);
     try {
-      const result = await api<{ id: string }>("/conversations", {
-        method: "POST", body: JSON.stringify({ type: "direct", members: [target.uid] }),
+      const result = await api<{ id: string; storagePath: "chats" | "conversations" }>("/conversations", {
+        method: "POST", body: JSON.stringify({
+          type: "direct",
+          members: [target.uid],
+          sessionExpirationSeconds: expirationSettings.defaultSessionExpirationSeconds,
+        }),
       });
       setProfiles((current) => ({ ...current, [target.uid]: target }));
       const conversation = conversations.find((item) => item.id === result.id);
       setHelpBotOpen(false);
       if (conversation) setActive(conversation);
-      else setActive({ id: result.id, type: "direct", members: [user.uid, target.uid] });
+      else setActive({ id: result.id, type: "direct", members: [user.uid, target.uid], storagePath: result.storagePath });
       setSearch("");
-      setResults([]);
       setViewingProfile(null);
     } catch (issue) {
-      setError(issue instanceof Error ? issue.message : "Could not start conversation.");
+      const message = issue instanceof Error ? issue.message : "Could not start conversation.";
+      setDirectStartError(message);
+      setError(message);
     } finally {
       setStartingDirect(false);
     }
@@ -167,7 +219,13 @@ export default function ChatDashboard({ user, onLogout }: Props) {
     try {
       const result = await api<{ id: string }>("/conversations", {
         method: "POST",
-        body: JSON.stringify({ type: "group", name: groupName.trim(), photoURL: groupPhoto.trim(), members: groupMembers }),
+        body: JSON.stringify({
+          type: "group",
+          name: groupName.trim(),
+          photoURL: groupPhoto.trim(),
+          members: groupMembers,
+          sessionExpirationSeconds: groupSessionExpirationSeconds,
+        }),
       });
       const newConversation: Conversation = { id: result.id, type: "group", name: groupName.trim(), photoURL: groupPhoto.trim(), members: [user.uid, ...groupMembers], admins: [user.uid] };
       setHelpBotOpen(false);
@@ -197,22 +255,42 @@ export default function ChatDashboard({ user, onLogout }: Props) {
   async function saveProfile() {
     setSavingProfile(true);
     setError("");
+    setProfileNotice("");
     try {
       const displayName = profileName.trim();
       const username = profileUsername.trim();
-      await api("/profile", { method: "POST", body: JSON.stringify({
-        displayName,
-        username,
-        photoURL: profilePhoto.trim(),
-        about: profileAbout.trim(),
-        shareEmail,
-      }) });
       await updateProfile(user, { displayName, photoURL: profilePhoto.trim() || null });
-      setProfileOpen(false);
+      await syncUserProfile(user, {
+        fullName: displayName,
+        username,
+        profilePicture: profilePhoto.trim(),
+        about: profileAbout.trim(),
+      });
+      setProfileNotice("Profile updated. Search People will refresh automatically.");
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Profile could not be updated.");
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function saveExpirationSettings() {
+    setSavingSettings(true);
+    setError("");
+    try {
+      await api("/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          defaultMessageExpirationSeconds: expirationSettings.defaultMessageExpirationSeconds,
+          defaultSessionExpirationSeconds: expirationSettings.defaultSessionExpirationSeconds,
+        }),
+      });
+      setSettingsOpen(false);
+      setProfileNotice("Expiration settings saved.");
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Expiration settings could not be saved.");
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -237,25 +315,25 @@ export default function ChatDashboard({ user, onLogout }: Props) {
             setProfileUsername(profiles[user.uid]?.username || defaultUsername(user.displayName || user.email || "", user.uid));
             setProfilePhoto(profiles[user.uid]?.photoURL || user.photoURL || "");
             setProfileAbout(profiles[user.uid]?.about || "");
-              setShareEmail(Boolean(profiles[user.uid]?.email));
             setProfileOpen(true);
             setMenuOpen(false);
           }}><Settings size={16} /> Edit profile</button>
+          <button onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}><Settings size={16} /> Settings</button>
           <button onClick={toggleNotifications}>{notifications ? <BellOff size={16} /> : <Bell size={16} />}{notifications ? "Turn off notifications" : "Enable notifications"}</button>
           <button onClick={() => void onLogout()}><LogOut size={16} /> Sign out</button>
         </div>}
       </header>
       <div className="current-user">
         <Avatar name={user.displayName || user.email || ""} />
-        <div className="user-copy"><strong>{user.displayName || "Welcome to Gather"}</strong><span>Available</span></div>
+        <div className="user-copy"><strong>{user.displayName || "Welcome to Gather"}</strong><span>{isProfileOnline(profiles[user.uid]) ? "Online" : "Offline"}</span></div>
         <button className="icon-button notification-button" title="Notifications" onClick={toggleNotifications}>{notifications ? <Bell size={17} /> : <BellOff size={17} />}{unreadNotifications > 0 && <i>{unreadNotifications > 9 ? "9+" : unreadNotifications}</i>}</button>
       </div>
       <div className="sidebar-section-heading"><span>Messages</span><button className="icon-button new-chat-button" title="Create a group" onClick={() => setShowGroup(true)}><Plus size={18} /></button></div>
       <div className="search-wrap"><Search size={16} /><input placeholder="Search people…" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search users" /></div>
       {search.trim().length >= 2 && <div className="search-results" aria-live="polite">
-        {busy && results.length === 0 && <div className="subtle-state">Searching registered accounts…</div>}
-        {!busy && searchError && <div className="subtle-state search-error">{searchError}</div>}
-        {!busy && !searchError && results.length === 0 && <div className="subtle-state">No registered users found</div>}
+        {!directoryLoaded && <div className="subtle-state">Loading registered accounts…</div>}
+        {directoryLoaded && searchError && <div className="subtle-state search-error">{searchError}</div>}
+        {directoryLoaded && !searchError && results.length === 0 && <div className="subtle-state">No registered users found</div>}
         {results.map((person) => <button className="search-person" key={person.uid} onClick={() => setViewingProfile(person)}>
           <Avatar small name={person.displayName} photoURL={person.photoURL} online={isProfileOnline(person)} />
           <span><strong>{person.displayName}</strong><small>@{person.username || defaultUsername(person.displayName, person.uid)} · {isProfileOnline(person) ? "Online" : "Offline"}</small></span>
@@ -300,12 +378,18 @@ export default function ChatDashboard({ user, onLogout }: Props) {
     </aside>
     <section className={`main-panel ${active || helpBotOpen ? "" : "main-panel-empty"}`}>
       {error && <div className="global-error"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss"><X size={16} /></button></div>}
+      {presenceError && <div className="global-error" role="alert"><span>{presenceError}</span><button onClick={onClearPresenceError} aria-label="Dismiss"><X size={16} /></button></div>}
+      {(expirationNotice || profileNotice) && <div className="global-success" role="status">
+        <span>{expirationNotice || profileNotice}</span>
+        <button onClick={() => { setExpirationNotice(""); setProfileNotice(""); }} aria-label="Dismiss"><X size={16} /></button>
+      </div>}
       {helpBotOpen ? <HelpBotPanel key={user.uid} user={user} onBack={() => setHelpBotOpen(false)} /> : active ? <MessagePanel
         key={active.id}
         conversation={active}
         title={getTitle(active)}
         profile={getProfile(active)}
         user={user}
+        defaultMessageExpirationSeconds={expirationSettings.defaultMessageExpirationSeconds}
         onBack={() => setActive(null)}
         onError={setError}
       /> : <div className="welcome-panel">
@@ -322,6 +406,9 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         <header><div><span className="eyebrow">Bring people together</span><h2>Create a group</h2></div><button className="icon-button" onClick={() => setShowGroup(false)} aria-label="Close"><X size={20} /></button></header>
         <label>Group name<input autoFocus value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="e.g. Weekend plans" maxLength={100} /></label>
         <label>Group picture URL<input type="url" value={groupPhoto} onChange={(event) => setGroupPhoto(event.target.value)} placeholder="Optional image URL" /></label>
+        <label>Session expiration<select value={groupSessionExpirationSeconds} onChange={(event) => setGroupSessionExpirationSeconds(Number(event.target.value))}>
+          {sessionExpirationOptions.map(([seconds, label]) => <option key={seconds} value={seconds}>{label}</option>)}
+        </select></label>
         <label>Find members<div className="search-wrap modal-search"><Search size={16} /><input placeholder="Search people…" value={search} onChange={(event) => setSearch(event.target.value)} /></div></label>
         <div className="member-picker">
           {results.map((person) => <button className="member-option" key={person.uid} onClick={() => setGroupMembers((members) => members.includes(person.uid) ? members.filter((id) => id !== person.uid) : [...members, person.uid])}>
@@ -335,6 +422,25 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         <button className="primary-button full-button" disabled={!groupName.trim() || !groupMembers.length} onClick={() => void createGroup()}>Create group <ChevronDown size={16} /></button>
       </section>
     </div>}
+    {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+      <section className="group-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header><div><span className="eyebrow">Privacy and retention</span><h2 id="settings-title">Settings</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close"><X size={20} /></button></header>
+        <label>Default disappearing message duration<select value={expirationSettings.defaultMessageExpirationSeconds} onChange={(event) => setExpirationSettings((settings) => ({ ...settings, defaultMessageExpirationSeconds: Number(event.target.value) }))}>
+          {messageExpirationOptions.map(([seconds, label]) => <option key={seconds} value={seconds}>{label}</option>)}
+        </select></label>
+        <label>Default session lifetime<select value={expirationSettings.defaultSessionExpirationSeconds} onChange={(event) => setExpirationSettings((settings) => ({ ...settings, defaultSessionExpirationSeconds: Number(event.target.value) }))}>
+          {sessionExpirationOptions.map(([seconds, label]) => <option key={seconds} value={seconds}>{label}</option>)}
+        </select></label>
+        <div className="account-expiration-summary">
+          <strong>Account lifetime</strong>
+          <span>{expirationSettings.accountExpiresAt
+            ? `Expires ${new Date(expirationSettings.accountExpiresAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`
+            : "Expiration date is being set up."}</span>
+          {expirationSettings.accountExpiresAt && <small>{Math.max(0, Math.ceil((expirationSettings.accountExpiresAt - Date.now()) / dayMilliseconds))} days remaining · {expirationSettings.accountLifetimeDays}-day lifetime</small>}
+        </div>
+        <button className="primary-button full-button" disabled={savingSettings} onClick={() => void saveExpirationSettings()}>{savingSettings ? "Saving…" : "Save settings"}</button>
+      </section>
+    </div>}
     {profileOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
       <section className="group-modal profile-edit-modal">
         <header><div><span className="eyebrow">Your Gather profile</span><h2>Edit profile</h2></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close"><X size={20} /></button></header>
@@ -342,8 +448,8 @@ export default function ChatDashboard({ user, onLogout }: Props) {
         <label>Username<input value={profileUsername} onChange={(event) => setProfileUsername(event.target.value)} minLength={2} maxLength={32} pattern="[A-Za-z0-9._-]{2,32}" autoCapitalize="none" autoCorrect="off" required /></label>
         <label>About<textarea value={profileAbout} onChange={(event) => setProfileAbout(event.target.value)} maxLength={300} placeholder="A little about you" /></label>
         <label>Profile picture URL<input type="url" value={profilePhoto} onChange={(event) => setProfilePhoto(event.target.value)} placeholder="https://…" /></label>
-        <label className="privacy-toggle"><input type="checkbox" checked={shareEmail} onChange={(event) => setShareEmail(event.target.checked)} /> Show my email to signed-in users</label>
         <button className="primary-button full-button" disabled={!profileName.trim() || !/^[a-zA-Z0-9._-]{2,32}$/.test(profileUsername.trim()) || savingProfile} onClick={() => void saveProfile()}>{savingProfile ? "Saving…" : "Save changes"}</button>
+        {profileNotice && <p className="success-message" role="status">{profileNotice}</p>}
       </section>
     </div>}
     {viewingProfile && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewingProfile(null); }}>
@@ -358,13 +464,13 @@ export default function ChatDashboard({ user, onLogout }: Props) {
           </span>
         </div>
         <div className="profile-details">
-          {viewingProfile.email && <div><span>Email</span><strong>{viewingProfile.email}</strong></div>}
           <div><span>Last seen</span><strong>{isProfileOnline(viewingProfile) ? "Now" : formatLastSeen(viewingProfile.lastSeen)}</strong></div>
           <div className="profile-about"><span>About</span><p>{viewingProfile.about?.trim() || "This person hasn't added an about section yet."}</p></div>
         </div>
         <button className="primary-button full-button chat-now-button" disabled={startingDirect} onClick={() => void startDirect(viewingProfile)}>
           <MessageCircle size={17} />{startingDirect ? "Opening chat…" : "Chat Now"}
         </button>
+        {directStartError && <p className="chat-start-error" role="alert">{directStartError}</p>}
       </section>
     </div>}
   </main>;

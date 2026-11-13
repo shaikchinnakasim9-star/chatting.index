@@ -1,6 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles.css";
+import { initLiquidGlassButtons } from "./liquid-glass";
+
+const stopLiquidGlassButtons = initLiquidGlassButtons();
+window.addEventListener("pagehide", stopLiquidGlassButtons, { once: true });
 
 const required = [
   ["VITE_FIREBASE_API_KEY", "API key"],
@@ -39,12 +43,13 @@ if (missing.length) {
     root.render(<React.StrictMode><App /></React.StrictMode>);
   }).catch((error: unknown) => {
     console.error("Gather could not start:", error);
+    const message = error instanceof Error ? error.message : "Refresh the page. If the problem continues, check the browser console and restart the development server.";
     root.render(
       <main className="setup-page">
         <section className="setup-card">
           <div className="brand-lockup"><span className="brand-mark">g</span><span>gather</span></div>
           <h1>Gather couldn't start</h1>
-          <p>Refresh the page. If the problem continues, check the browser console and restart the development server.</p>
+          <p role="alert">{message}</p>
         </section>
       </main>,
     );

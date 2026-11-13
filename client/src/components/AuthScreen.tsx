@@ -2,14 +2,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification, signInWithEmailAndPassword, updateProfile, type User } from "firebase/auth";
 import { ArrowRight, CheckCircle2, MessageCircle, ShieldCheck } from "lucide-react";
 import { auth } from "../firebase";
+import { api } from "../services/api";
+import { syncUserProfile } from "../services/profile";
 
 type Props = {
   verificationUser?: User | null;
   onVerifiedSession?: () => void;
+  profileSyncError?: string;
+  onRetryProfileSync?: () => void;
 };
 
 const retryKey = (uid: string) => `gather-verification-retry-${uid}`;
 const pendingErrorKey = (uid: string) => `gather-verification-error-${uid}`;
+const pendingLifetimeKey = (uid: string) => `gather-account-lifetime-${uid}`;
 
 function authErrorMessage(issue: unknown) {
   const code = typeof issue === "object" && issue !== null && "code" in issue
@@ -25,11 +30,12 @@ function authErrorMessage(issue: unknown) {
     : "The verification email could not be sent.";
 }
 
-export default function AuthScreen({ verificationUser, onVerifiedSession }: Props) {
+export default function AuthScreen({ verificationUser, onVerifiedSession, profileSyncError, onRetryProfileSync }: Props) {
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [accountLifetimeDays, setAccountLifetimeDays] = useState(365);
   const [error, setError] = useState("");
   const [authSetupRequired, setAuthSetupRequired] = useState(false);
   const [notice, setNotice] = useState("");
@@ -63,9 +69,27 @@ export default function AuthScreen({ verificationUser, onVerifiedSession }: Prop
       } else if (mode === "register") {
         const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
         await updateProfile(credential.user, { displayName: name.trim() });
+        localStorage.setItem(pendingLifetimeKey(credential.user.uid), String(accountLifetimeDays));
+        let profileSyncError: unknown;
+        try {
+          await syncUserProfile(credential.user, { fullName: name.trim() });
+          await api("/register-profile", {
+            method: "POST",
+            body: JSON.stringify({ displayName: name.trim(), accountLifetimeDays }),
+          });
+          localStorage.removeItem(pendingLifetimeKey(credential.user.uid));
+        } catch (issue) {
+          profileSyncError = issue;
+        }
         await sendEmailVerification(credential.user);
         localStorage.setItem(retryKey(credential.user.uid), String(Date.now() + 60_000));
-        setNotice("Your account is ready. Verify your email using the link we just sent.");
+        if (profileSyncError) {
+          const message = `Your account was created and the verification email was sent, but its Firestore profile could not be saved: ${authErrorMessage(profileSyncError)}. Sign in again after setup is restored to retry profile synchronization.`;
+          localStorage.setItem(pendingErrorKey(credential.user.uid), message);
+          setNotice("Your verification email is on its way. Profile setup will be retried after you verify and sign in.");
+        } else {
+          setNotice("Your account is ready. Verify your email using the link we just sent.");
+        }
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -129,6 +153,10 @@ export default function AuthScreen({ verificationUser, onVerifiedSession }: Prop
       <CheckCircle2 className="verification-icon" size={40} />
       <h1>Check your inbox</h1>
       <p>We sent a verification link to <strong>{verificationUser.email}</strong>. Check your inbox and spam/junk folder.</p>
+      {profileSyncError && <div className="error-message" role="alert">
+        <p>Your Firestore profile could not be synchronized: {profileSyncError}</p>
+        <button className="text-button" onClick={onRetryProfileSync}>Retry profile setup</button>
+      </div>}
       {savedError && !error && <p className="error-message">{savedError}</p>}
       <button className="primary-button full-button" onClick={resendVerification} disabled={busy || resendSeconds > 0}>
         {busy ? "Sending…" : resendSeconds > 0 ? `Resend available in ${resendSeconds}s` : "Resend verification email"}
@@ -172,6 +200,9 @@ export default function AuthScreen({ verificationUser, onVerifiedSession }: Prop
         </div>
         <form onSubmit={submit} className="auth-form" key={`${mode}-form`}>
           {mode === "register" && <label>Full name<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How should we call you?" maxLength={80} /></label>}
+          {mode === "register" && <label>Account lifetime<select value={accountLifetimeDays} onChange={(event) => setAccountLifetimeDays(Number(event.target.value))}>
+            {[7, 30, 90, 180, 365].map((days) => <option key={days} value={days}>{days} days</option>)}
+          </select></label>}
           <label>Email address<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
           {mode !== "forgot" && <label>Password<input required type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} /></label>}
           {mode === "login" && <div className="form-helper"><span>Secure sign-in</span><button type="button" className="text-button" onClick={() => setMode("forgot")}>Forgot password?</button></div>}

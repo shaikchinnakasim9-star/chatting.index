@@ -3,7 +3,7 @@ import {
   ArrowLeft, Check, CheckCheck, FileText, ImagePlus, Mic, MoreHorizontal, Paperclip,
   Search, Send, Smile, Square, Users, X,
 } from "lucide-react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 import { getBlob, ref, uploadBytes } from "firebase/storage";
 import type { User } from "firebase/auth";
 import { db, storage } from "../firebase";
@@ -15,6 +15,7 @@ type Props = {
   title: string;
   profile?: Profile;
   user: User;
+  defaultMessageExpirationSeconds: number;
   onBack: () => void;
   onError: (message: string) => void;
 };
@@ -37,7 +38,7 @@ function formatTime(message: Message) {
   return date ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Sending…";
 }
 
-export default function MessagePanel({ conversation, title, profile, user, onBack, onError }: Props) {
+export default function MessagePanel({ conversation, title, profile, user, defaultMessageExpirationSeconds, onBack, onError }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,6 +56,9 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
   const [editText, setEditText] = useState("");
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [messageExpirationSeconds, setMessageExpirationSeconds] = useState(defaultMessageExpirationSeconds);
+  const [expirationClock, setExpirationClock] = useState(Date.now());
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(conversation.expiresAt);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -88,7 +92,7 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
 
   useEffect(() => {
     setLoading(true);
-    return watchMessages(conversation.id, (items) => {
+    return watchMessages(conversation.id, conversation.storagePath, (items) => {
       setMessages(items);
       setLoading(false);
       requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
@@ -96,14 +100,25 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
         void api(`/conversations/${conversation.id}/read`, { method: "POST" }).catch((issue: unknown) => onError(issue instanceof Error ? issue.message : "Could not mark messages as read."));
       }
     }, (issue) => { setLoading(false); onError(issue.message); });
-  }, [conversation.id, user.uid, onError]);
+  }, [conversation.id, conversation.storagePath, user.uid, onError]);
 
-  useEffect(() => onSnapshot(doc(db, "conversations", conversation.id), (snapshot) => {
+  useEffect(() => onSnapshot(doc(db, conversation.storagePath ?? "conversations", conversation.id), (snapshot) => {
     const data = snapshot.data();
+    setSessionExpiresAt(data?.expiresAt as Conversation["expiresAt"]);
     setTypingBy((data?.typing as Record<string, unknown>) ?? {});
     if (Array.isArray(data?.members)) setMemberIds(data.members as string[]);
     if (Array.isArray(data?.admins)) setAdmins(data.admins as string[]);
-  }, (issue) => onError(issue.message)), [conversation.id, onError]);
+  }, (issue) => onError(issue.message)), [conversation.id, conversation.storagePath, onError]);
+
+  useEffect(() => {
+    setMessageExpirationSeconds(defaultMessageExpirationSeconds);
+  }, [defaultMessageExpirationSeconds]);
+
+  useEffect(() => {
+    if (!messages.some((message) => message.expiresAt) && !sessionExpiresAt) return;
+    const timer = window.setInterval(() => setExpirationClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [messages, sessionExpiresAt]);
 
   useEffect(() => {
     if (!Object.keys(typingBy).length) return;
@@ -142,11 +157,11 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
     const message = text.trim();
-    if (!message || sending) return;
+    if (!message || sending || sessionExpired) return;
     setSending(true);
     try {
       await api(`/conversations/${conversation.id}/messages`, {
-        method: "POST", body: JSON.stringify({ text: message, type: "text" }),
+        method: "POST", body: JSON.stringify({ text: message, type: "text", expirationSeconds: messageExpirationSeconds }),
       });
       setText("");
       void setTyping(false);
@@ -159,16 +174,18 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
 
   async function sendFile(file?: File) {
     if (!file) return;
+    if (sessionExpired) { onError("This chat session has expired."); return; }
     if (!allowedTypes.has(file.type)) { onError("Choose an image, PDF, or Word document."); return; }
     if (file.size > maxFileSize) { onError("Attachments must be 10 MB or smaller."); return; }
     setSending(true);
     try {
-      const path = `uploads/${user.uid}/${conversation.id}/${Date.now()}-${file.name.replace(/[^\w.-]/g, "_")}`;
+      const messageId = doc(collection(db, conversation.storagePath ?? "conversations", conversation.id, "messages")).id;
+      const path = `uploads/${user.uid}/${conversation.id}/${messageId}/${file.name.replace(/[^\w.-]/g, "_")}`;
       const uploaded = await uploadBytes(ref(storage, path), file, { contentType: file.type });
       const type = file.type.startsWith("image/") ? "image" : "document";
       await api(`/conversations/${conversation.id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ text: "", type, filePath: uploaded.ref.fullPath, fileName: file.name }),
+        body: JSON.stringify({ text: "", type, filePath: uploaded.ref.fullPath, fileName: file.name, messageId, expirationSeconds: messageExpirationSeconds }),
       });
     } catch (issue) {
       onError(issue instanceof Error ? issue.message : "The attachment could not be uploaded.");
@@ -179,6 +196,7 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
   }
 
   async function sendVoice(blob: Blob, mimeType: string, durationSeconds: number) {
+    if (sessionExpired) { onError("This chat session has expired."); return; }
     if (blob.size > maxFileSize) {
       onError("Voice messages must be 10 MB or smaller. Try recording a shorter message.");
       return;
@@ -187,7 +205,8 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
     try {
       const extension = mimeType === "audio/mp4" ? "m4a" : mimeType === "audio/ogg" ? "ogg" : "webm";
       const fileName = `voice-${Date.now()}.${extension}`;
-      const path = `uploads/${user.uid}/${conversation.id}/${fileName}`;
+      const messageId = doc(collection(db, conversation.storagePath ?? "conversations", conversation.id, "messages")).id;
+      const path = `uploads/${user.uid}/${conversation.id}/${messageId}/${fileName}`;
       const uploaded = await uploadBytes(ref(storage, path), blob, { contentType: mimeType });
       await api(`/conversations/${conversation.id}/messages`, {
         method: "POST",
@@ -196,8 +215,10 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
           type: "voice",
           filePath: uploaded.ref.fullPath,
           fileName,
+          messageId,
           mimeType,
           durationSeconds: Math.max(1, Math.min(maxVoiceSeconds, durationSeconds)),
+          expirationSeconds: messageExpirationSeconds,
         }),
       });
     } catch (issue) {
@@ -328,10 +349,13 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
     } catch (issue) { onError(issue instanceof Error ? issue.message : "Group admin permissions could not be changed."); }
   }
 
+  const visibleMessages = messages.filter((message) =>
+    !message.expiresAt || message.expiresAt.toDate().getTime() > expirationClock);
   const filteredMessages = messageSearch.trim()
-    ? messages.filter((message) => message.text.toLowerCase().includes(messageSearch.trim().toLowerCase())
+    ? visibleMessages.filter((message) => message.text.toLowerCase().includes(messageSearch.trim().toLowerCase())
       || (message.type === "voice" && "voice message".includes(messageSearch.trim().toLowerCase())))
-    : messages;
+    : visibleMessages;
+  const sessionExpired = Boolean(sessionExpiresAt && sessionExpiresAt.toDate().getTime() <= expirationClock);
   const typingNames = memberIds
     .filter((uid) => {
       const timestamp = typingBy[uid];
@@ -350,6 +374,7 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
       {showInfo && <div className="popover conversation-info">
         <div className="info-heading"><strong>{title}</strong><button className="icon-button" onClick={() => setShowInfo(false)} aria-label="Close details"><X size={16} /></button></div>
         <span className="info-subtitle">{conversation.type === "group" ? "Group members" : "Personal conversation"}</span>
+        {sessionExpiresAt && <span className="info-subtitle">Session expires {sessionExpiresAt.toDate().toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>}
         {conversation.type === "group" && members.map((member) => <div className="info-member" key={member.uid}>
           <span className="avatar avatar-small">{member.photoURL ? <img src={member.photoURL} alt="" /> : initials(member.displayName)}</span>
           <span>{member.displayName}{admins.includes(member.uid) && <small>Admin</small>}</span>
@@ -365,7 +390,8 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
       </div>}
     </header>
     <div className="message-canvas">
-      {loading ? <div className="message-state">Loading messages…</div> : messages.length === 0 ? <div className="message-empty">
+      {sessionExpired && <div className="session-expired-notice" role="status">Your chat session has expired.</div>}
+      {loading ? <div className="message-state">Loading messages…</div> : visibleMessages.length === 0 ? <div className="message-empty">
         <span className="empty-icon"><MessageCircleIcon /></span><strong>Start the conversation</strong><span>Say hello to {title}.</span>
       </div> : filteredMessages.length === 0 ? <div className="message-state">No messages match “{messageSearch}”.</div> : filteredMessages.map((message, index) => {
         const own = message.senderId === user.uid;
@@ -403,13 +429,19 @@ export default function MessagePanel({ conversation, title, profile, user, onBac
       <div ref={bottomRef} />
     </div>
     <form className="composer" onSubmit={(event) => void sendMessage(event)}>
+      <label className="expiration-picker">Disappears
+        <select value={messageExpirationSeconds} onChange={(event) => setMessageExpirationSeconds(Number(event.target.value))} disabled={sessionExpired || sending}>
+          <option value={60}>1 min</option><option value={300}>5 min</option><option value={1800}>30 min</option>
+          <option value={3600}>1 hour</option><option value={86400}>24 hours</option><option value={604800}>7 days</option>
+        </select>
+      </label>
       <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.doc,.docx" hidden onChange={(event) => void sendFile(event.target.files?.[0])} />
-      <button className="icon-button composer-attach" type="button" aria-label="Attach file" onClick={() => fileInputRef.current?.click()} disabled={sending || recording}><Paperclip size={19} /></button>
-      <button className="icon-button composer-image" type="button" aria-label="Share image" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} disabled={sending || recording}><ImagePlus size={19} /></button>
+      <button className="icon-button composer-attach" type="button" aria-label="Attach file" onClick={() => fileInputRef.current?.click()} disabled={sending || recording || sessionExpired}><Paperclip size={19} /></button>
+      <button className="icon-button composer-image" type="button" aria-label="Share image" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} disabled={sending || recording || sessionExpired}><ImagePlus size={19} /></button>
       {recording && <div className="recording-status"><i /><span>Recording {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}</span><button type="button" onClick={() => stopRecording(true)}>Cancel</button></div>}
-      <div className="composer-input"><textarea rows={1} placeholder={recording ? "Recording a voice message…" : `Message ${title}…`} value={text} onChange={(event) => updateDraft(event.target.value)} onKeyDown={handleKeyDown} maxLength={10000} disabled={recording || sending} /><button type="button" className="icon-button emoji-button" aria-label="Add emoji" onClick={() => updateDraft(`${text}🙂`)} disabled={recording || sending}><Smile size={19} /></button></div>
-      <button className={`icon-button voice-button ${recording ? "voice-recording" : ""}`} type="button" aria-label={recording ? "Stop and send voice message" : "Record voice message"} title={recording ? "Stop and send voice message" : "Record voice message"} onClick={() => recording ? stopRecording() : void startRecording()} disabled={sending}>{recording ? <Square size={17} /> : <Mic size={19} />}</button>
-      <button className="send-button" type="submit" disabled={!text.trim() || sending || recording} aria-label="Send message"><Send size={18} /></button>
+      <div className="composer-input"><textarea rows={1} placeholder={sessionExpired ? "This session has expired" : recording ? "Recording a voice message…" : `Message ${title}…`} value={text} onChange={(event) => updateDraft(event.target.value)} onKeyDown={handleKeyDown} maxLength={10000} disabled={recording || sending || sessionExpired} /><button type="button" className="icon-button emoji-button" aria-label="Add emoji" onClick={() => updateDraft(`${text}🙂`)} disabled={recording || sending || sessionExpired}><Smile size={19} /></button></div>
+      <button className={`icon-button voice-button ${recording ? "voice-recording" : ""}`} type="button" aria-label={recording ? "Stop and send voice message" : "Record voice message"} title={recording ? "Stop and send voice message" : "Record voice message"} onClick={() => recording ? stopRecording() : void startRecording()} disabled={sending || sessionExpired}>{recording ? <Square size={17} /> : <Mic size={19} />}</button>
+      <button className="send-button" type="submit" disabled={!text.trim() || sending || recording || sessionExpired} aria-label="Send message"><Send size={18} /></button>
       <span className="composer-hint">Enter to send · Shift + Enter for a new line</span>
     </form>
   </section>;

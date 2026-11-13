@@ -2,16 +2,64 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && activeAccount();
+    }
+
+    function activeAccount() {
+      let accountPath = /databases/(default)/documents/users/$(request.auth.uid);
+      return !firestore.exists(accountPath)
+        || !firestore.get(accountPath).data.keys().hasAny(['accountExpiresAt'])
+        || firestore.get(accountPath).data.accountExpiresAt > request.time;
     }
 
     function conversationMember(conversationId) {
       return signedIn()
-        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.members;
+        && (
+          (
+            request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.members
+            && (!firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.keys().hasAny(['expiresAt'])
+              || firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.expiresAt > request.time)
+          )
+          || (
+            request.auth.uid in firestore.get(/databases/(default)/documents/chats/$(conversationId)).data.participants
+            && (!firestore.get(/databases/(default)/documents/chats/$(conversationId)).data.keys().hasAny(['expiresAt'])
+              || firestore.get(/databases/(default)/documents/chats/$(conversationId)).data.expiresAt > request.time)
+          )
+        );
+    }
+
+    function activeAttachment(uid, conversationId, messageId, fileName) {
+        let conversationMessage = /databases/(default)/documents/conversations/$(conversationId)/messages/$(messageId);
+        let directMessage = /databases/(default)/documents/chats/$(conversationId)/messages/$(messageId);
+        let expectedPath = 'uploads/' + uid + '/' + conversationId + '/' + messageId + '/' + fileName;
+        return (
+          firestore.exists(conversationMessage)
+          && firestore.get(conversationMessage).data.filePath == expectedPath
+          && firestore.get(conversationMessage).data.expiresAt > request.time
+        ) || (
+          firestore.exists(directMessage)
+          && firestore.get(directMessage).data.filePath == expectedPath
+          && firestore.get(directMessage).data.expiresAt > request.time
+        );
     }
 
     match /uploads/{uid}/{conversationId}/{fileName} {
-      allow read: if conversationMember(conversationId);
+        allow read: if conversationMember(conversationId);
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && conversationMember(conversationId)
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches(
+          'image/(jpeg|png|gif|webp)|audio/(webm|mp4|ogg)|application/pdf|application/msword|application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        );
+      allow update, delete: if false;
+    }
+
+    match /uploads/{uid}/{conversationId}/{messageId}/{fileName} {
+      allow read: if conversationMember(conversationId)
+        && activeAttachment(uid, conversationId, messageId, fileName);
       allow create: if signedIn()
         && request.auth.uid == uid
         && conversationMember(conversationId)

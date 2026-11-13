@@ -59,9 +59,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .auth-form label:nth-child(3) { animation-delay: .22s; }
 .auth-form .form-helper, .auth-form > .error-message, .auth-form > .success-message { animation: fade-up .35s both; }
 .auth-form label, .group-modal label { display: grid; gap: 8px; color: #38475a; font-size: 12px; font-weight: 600; }
-.auth-form input, .group-modal input { width: 100%; padding: 13px 14px; color: #243248; border: 1px solid #dfe4eb; border-radius: 8px; background: white; font-size: 13px; transition: border-color .16s, box-shadow .16s; }
+.auth-form input, .auth-form select, .group-modal input, .group-modal select { width: 100%; padding: 13px 14px; color: #243248; border: 1px solid #dfe4eb; border-radius: 8px; background: white; font-size: 13px; transition: border-color .16s, box-shadow .16s; }
 .auth-form input::placeholder, .group-modal input::placeholder { color: #a0a9b5; }
-.auth-form input:focus, .group-modal input:focus { border-color: #748eaf; box-shadow: 0 0 0 3px #315a9117; outline: 0; }
+.auth-form input:focus, .auth-form select:focus, .group-modal input:focus, .group-modal select:focus { border-color: #748eaf; box-shadow: 0 0 0 3px #315a9117; outline: 0; }
 .form-helper { display: flex; align-items: center; justify-content: space-between; color: #8792a0; font-size: 11px; }
 .text-button { padding: 0; color: var(--blue); border: 0; background: transparent; font-size: inherit; font-weight: 600; }
 .text-button:hover { color: #172b4d; text-decoration: underline; }
@@ -190,6 +190,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .help-bot-composer .primary-button { width: 42px; height: 42px; padding: 0; }
 .global-error { position: absolute; z-index: 6; top: 14px; right: 16px; left: 16px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 13px; color: #8d3e3e; border: 1px solid #f1d8d6; border-radius: 8px; background: #fff5f4; box-shadow: 0 4px 10px #172b4d10; font-size: 11px; }
 .global-error button { display: grid; place-items: center; color: #8d3e3e; border: 0; background: transparent; }
+.global-success { position: absolute; z-index: 6; top: 14px; right: 16px; left: 16px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 13px; color: #24744d; border: 1px solid #d5ecdd; border-radius: 8px; background: #f0faf4; box-shadow: 0 4px 10px #172b4d10; font-size: 11px; }
+.global-success button { display: grid; place-items: center; color: #24744d; border: 0; background: transparent; }
 
 .chat-view { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .chat-header { position: relative; z-index: 2; display: flex; height: 72px; flex: 0 0 auto; align-items: center; gap: 11px; padding: 0 23px; border-bottom: 1px solid var(--line); background: white; }
@@ -275,6 +277,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .send-button { display: grid; width: 41px; height: 41px; flex: 0 0 auto; place-items: center; color: white; border: 0; border-radius: 9px; background: #203b61; transition: background .15s; }
 .send-button:hover:not(:disabled) { background: #315a91; }
 .composer-hint { position: absolute; right: clamp(70px, 7vw, 110px); bottom: 10px; color: #a0a9b4; font-size: 8px; }
+.expiration-picker { display: grid; flex: 0 0 auto; gap: 3px; color: #718096; font-size: 8px; }
+.expiration-picker select { max-width: 76px; padding: 8px 4px; color: #344255; border: 1px solid #e5e9ef; border-radius: 7px; background: #fafbfd; font-size: 9px; }
+.session-expired-notice { margin: 14px auto; padding: 9px 14px; color: #805c1e; border: 1px solid #f1e4c9; border-radius: 8px; background: #fffaf0; font-size: 11px; text-align: center; }
 .modal-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: #16263d66; }
 .group-modal { width: min(100%, 430px); padding: 23px; border: 1px solid #e7ebf0; border-radius: 13px; background: white; box-shadow: 0 25px 70px #15243b30; }
 .group-modal header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
@@ -288,6 +293,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .member-option svg { color: #3c699e; }
 .selected-count { margin: 10px 0; color: #718096; font-size: 10px; }
 .group-modal > .primary-button { margin-top: 16px; }
+.settings-modal { max-height: min(90vh, 700px); overflow-y: auto; }
+.account-expiration-summary { display: grid; gap: 6px; margin: 20px 0 8px; padding: 14px; color: #38475a; border: 1px solid #e8edf2; border-radius: 8px; background: #f8fafc; font-size: 12px; }
+.account-expiration-summary span, .account-expiration-summary small { color: #718096; font-size: 11px; }
 .profile-edit-modal textarea { width: 100%; min-height: 78px; resize: vertical; padding: 12px 14px; color: #243248; border: 1px solid #dfe4eb; border-radius: 8px; background: white; font: inherit; font-size: 13px; }
 .privacy-toggle { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 9px !important; color: #637187 !important; font-weight: 500 !important; }
 .privacy-toggle input { width: 15px; height: 15px; accent-color: #274c78; }
@@ -307,7 +315,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .profile-details > div > span { color: #8995a4; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
 .profile-details strong, .profile-about p { overflow-wrap: anywhere; margin: 0; color: #46566b; font-size: 12px; font-weight: 500; line-height: 1.6; }
 .chat-now-button { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 3px; }
+.chat-start-error { margin: 10px 0 0; color: #a23838; font-size: 12px; line-height: 1.5; }
 .loading-screen { display: flex; min-height: 100vh; align-items: center; justify-content: center; gap: 10px; color: #607087; background: #f8f9fb; font: 600 13px Manrope, sans-serif; }
+.profile-sync-error { flex-direction: column; padding: 24px; text-align: center; }
+.profile-sync-error [role="alert"] { width: min(100%, 720px); margin: 0 0 8px; overflow-wrap: anywhere; line-height: 1.6; }
+.profile-sync-actions { display: flex; align-items: center; justify-content: center; gap: 16px; }
 .loading-screen .brand-mark { display: grid; place-items: center; font-size: 19px; }
 .setup-page { display: grid; min-height: 100vh; place-items: center; padding: 28px; background: #f4f6f9; }
 .setup-card { width: min(100%, 540px); padding: clamp(24px, 6vw, 46px); border: 1px solid #e6eaf0; border-radius: 14px; background: white; box-shadow: 0 16px 50px #172b4d10; }
@@ -362,4 +374,225 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* Liquid Glass button system */
+button {
+  --button-glass-tint: 255, 255, 255;
+  --button-glass-opacity: .56;
+  --button-glass-border: .72;
+  border: 1px solid rgb(255 255 255 / var(--button-glass-border));
+  border-radius: 999px;
+  background:
+    radial-gradient(120px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 42%), transparent 74%),
+    linear-gradient(180deg, rgb(255 255 255 / 67%), rgb(255 255 255 / 24%) 46%, rgb(226 234 246 / 31%)),
+    rgb(var(--button-glass-tint) / var(--button-glass-opacity));
+  box-shadow:
+    0 3px 10px rgb(34 54 83 / 8%),
+    inset 0 1px 0 rgb(255 255 255 / 86%),
+    inset 0 -1px 0 rgb(60 81 110 / 7%);
+  -webkit-backdrop-filter: blur(16px) saturate(145%);
+  backdrop-filter: blur(16px) saturate(145%);
+  transition:
+    transform .2s cubic-bezier(.2, .75, .25, 1),
+    box-shadow .2s ease,
+    border-color .2s ease,
+    color .18s ease,
+    background-color .18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:enabled:hover {
+  border-color: rgb(255 255 255 / .94);
+  box-shadow:
+    0 7px 17px rgb(34 54 83 / 13%),
+    inset 0 1px 0 rgb(255 255 255 / 96%),
+    inset 0 -1px 0 rgb(60 81 110 / 9%);
+}
+
+button:enabled:active {
+  box-shadow:
+    0 1px 4px rgb(34 54 83 / 12%),
+    inset 0 2px 5px rgb(49 72 105 / 11%),
+    inset 0 1px 0 rgb(255 255 255 / 64%);
+  transform: scale(.98);
+  transition-duration: .08s;
+}
+
+button:focus-visible {
+  outline: 2px solid #6c91c5;
+  outline-offset: 3px;
+}
+
+.primary-button,
+.send-button {
+  --button-glass-opacity: .9;
+  --button-glass-border: .6;
+  border: 1px solid rgb(214 229 255 / .74);
+  border-radius: 999px;
+  background:
+    radial-gradient(130px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 37%), transparent 73%),
+    linear-gradient(180deg, rgb(255 255 255 / 25%), rgb(255 255 255 / 4%) 50%, rgb(8 23 47 / 12%)),
+    #203b61;
+  box-shadow:
+    0 7px 18px rgb(23 43 77 / 22%),
+    inset 0 1px 0 rgb(255 255 255 / 46%),
+    inset 0 -1px 0 rgb(8 23 47 / 25%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+.primary-button:enabled:hover,
+.send-button:enabled:hover {
+  border-color: rgb(255 255 255 / .92);
+  background:
+    radial-gradient(130px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 43%), transparent 73%),
+    linear-gradient(180deg, rgb(255 255 255 / 29%), rgb(255 255 255 / 6%) 50%, rgb(8 23 47 / 10%)),
+    #294a75;
+  box-shadow:
+    0 11px 25px rgb(23 43 77 / 28%),
+    inset 0 1px 0 rgb(255 255 255 / 56%),
+    inset 0 -1px 0 rgb(8 23 47 / 25%);
+}
+
+.primary-button:enabled:active,
+.send-button:enabled:active {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 15%), rgb(8 23 47 / 12%)),
+    #203b61;
+}
+
+.primary-button::after {
+  border-radius: inherit;
+}
+
+.icon-button,
+.floating-help {
+  --button-glass-opacity: .6;
+  --button-glass-border: .82;
+  border: 1px solid rgb(255 255 255 / .82);
+  border-radius: 999px;
+  background:
+    radial-gradient(75px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 65%), transparent 72%),
+    linear-gradient(180deg, rgb(255 255 255 / 84%), rgb(247 250 255 / 56%) 55%, rgb(224 232 244 / 44%));
+  box-shadow:
+    0 3px 9px rgb(34 54 83 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / 96%),
+    inset 0 -1px 0 rgb(60 81 110 / 8%);
+}
+
+.icon-button:enabled:hover,
+.floating-help:enabled:hover {
+  color: #233f66;
+}
+
+.text-button,
+.footer-link,
+.chat-title-button,
+.message-actions button,
+.edit-message button,
+.recording-status button,
+.global-error button,
+.global-success button {
+  --button-glass-opacity: .34;
+  --button-glass-border: .54;
+  border: 1px solid rgb(255 255 255 / .58);
+  background:
+    radial-gradient(100px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 74%), transparent 75%),
+    linear-gradient(180deg, rgb(255 255 255 / 68%), rgb(255 255 255 / 23%));
+  box-shadow:
+    0 2px 7px rgb(34 54 83 / 6%),
+    inset 0 1px 0 rgb(255 255 255 / 86%);
+}
+
+.text-button {
+  padding: 5px 10px;
+}
+
+.chat-title-button {
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.conversation-card,
+.search-person,
+.member-option,
+.menu-popover button,
+.help-bot-suggestions button {
+  --button-glass-opacity: .44;
+  --button-glass-border: .48;
+  border: 1px solid rgb(255 255 255 / .7);
+  background:
+    radial-gradient(140px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 70%), transparent 76%),
+    linear-gradient(180deg, rgb(255 255 255 / 77%), rgb(255 255 255 / 42%) 54%, rgb(237 242 249 / 49%));
+  box-shadow:
+    0 2px 7px rgb(35 52 77 / 5%),
+    inset 0 1px 0 rgb(255 255 255 / 94%),
+    inset 0 -1px 0 rgb(79 97 124 / 5%);
+}
+
+.conversation-card:enabled:hover,
+.search-person:enabled:hover,
+.member-option:enabled:hover,
+.menu-popover button:enabled:hover,
+.help-bot-suggestions button:enabled:hover {
+  background:
+    radial-gradient(140px circle at var(--pointer-x, 50%) var(--pointer-y, 0%), rgb(255 255 255 / 84%), transparent 76%),
+    linear-gradient(180deg, rgb(255 255 255 / 91%), rgb(255 255 255 / 58%) 54%, rgb(237 242 249 / 62%));
+}
+
+.conversation-active {
+  border-color: rgb(139 166 206 / .38);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 89%), rgb(229 237 249 / 68%)) !important;
+  box-shadow:
+    0 2px 8px rgb(43 75 119 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / .96);
+}
+
+.text-button:enabled:hover,
+.message-actions button:enabled:hover,
+.edit-message button:enabled:hover,
+.recording-status button:enabled:hover {
+  color: #172b4d;
+}
+
+.global-error button {
+  color: #8d3e3e;
+}
+
+.global-success button {
+  color: #24744d;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  button {
+    --button-glass-opacity: .92;
+    background-color: rgb(var(--button-glass-tint) / var(--button-glass-opacity));
+  }
+
+  .primary-button,
+  .send-button {
+    background-color: #203b61;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  button:not(.conversation-card):not(.search-person):not(.member-option):not(.footer-link):not(.chat-title-button):not(.message-actions button):not(.edit-message button):not(.recording-status button):enabled:hover {
+    transform: translateY(-1px);
+  }
+
+  .primary-button:enabled:hover,
+  .send-button:enabled:hover {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  button:enabled:hover,
+  button:enabled:active {
+    transform: none;
+    transition-duration: .01ms;
+  }
 }
